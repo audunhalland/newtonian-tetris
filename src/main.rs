@@ -107,12 +107,49 @@ impl TetrominoKind {
             _ => Self::Z,
         }
     }
+
+    fn layout(&self) -> TetrominoLayout {
+        match self {
+            Self::I => TetrominoLayout {
+                coords: [(1, 0), (1, 1), (1, 2), (1, 3)],
+                joints: vec![(0, 1), (1, 2), (2, 3)],
+            },
+            Self::O => TetrominoLayout {
+                coords: [(0, 0), (1, 0), (1, 1), (1, 0)],
+                joints: vec![(0, 1), (1, 2), (1, 2), (2, 3)],
+            },
+            Self::T => TetrominoLayout {
+                coords: [(0, 0), (1, 0), (2, 0), (1, 1)],
+                joints: vec![(0, 1), (1, 2), (1, 3)],
+            },
+            Self::J => TetrominoLayout {
+                coords: [(1, 0), (1, 1), (1, 2), (0, 2)],
+                joints: vec![(0, 1), (1, 2), (2, 3)],
+            },
+            Self::L => TetrominoLayout {
+                coords: [(1, 0), (1, 1), (1, 2), (2, 2)],
+                joints: vec![(0, 1), (1, 2), (2, 3)],
+            },
+            Self::S => TetrominoLayout {
+                coords: [(0, 1), (1, 1), (1, 0), (2, 0)],
+                joints: vec![(0, 1), (1, 2), (2, 3)],
+            },
+            Self::Z => TetrominoLayout {
+                coords: [(0, 0), (1, 0), (1, 1), (2, 1)],
+                joints: vec![(0, 1), (1, 2), (2, 3)],
+            },
+        }
+    }
+}
+
+struct TetrominoLayout {
+    coords: [(u8, u8); 4],
+    joints: Vec<(u8, u8)>,
 }
 
 struct Block;
 
 struct Tetromino {
-    kind: TetrominoKind,
     blocks: Vec<Entity>,
     joints: Vec<Entity>,
 }
@@ -185,40 +222,33 @@ fn spawn_block(
 }
 
 fn spawn_tetromino(commands: &mut Commands, game: &Game) {
-    let kind = TetrominoKind::I;
-    let lane = game.n_lanes / 2;
+    let kind = TetrominoKind::random();
+    let layout = kind.layout();
 
-    let mut prev_block_entity: Option<Entity> = None;
     let mut blocks: Vec<Entity> = vec![];
     let mut joints: Vec<Entity> = vec![];
 
-    for i in 0..4 {
-        let row = game.n_rows - 1 - i;
+    for (x, y) in layout.coords.iter() {
+        let lane = (game.n_lanes / 2) - 1 + x;
+        let row = game.n_rows - 1 - y;
         let block_entity = spawn_block(commands, game, kind, lane, row);
 
         blocks.push(block_entity);
-
-        if let Some(prev_block_entity) = prev_block_entity {
-            let joint = BallJoint::new(Point2::origin(), Point2::new(0.0, 1.0));
-            let joint_entity = commands
-                .spawn((JointBuilderComponent::new(
-                    joint,
-                    prev_block_entity,
-                    block_entity.clone(),
-                ),))
-                .current_entity()
-                .unwrap();
-            joints.push(joint_entity);
-        }
-
-        prev_block_entity = Some(block_entity);
     }
 
-    let tetromino = Tetromino {
-        kind,
-        blocks,
-        joints,
-    };
+    for (i, j) in layout.joints.iter() {
+        let prev = blocks[*i as usize];
+        let next = blocks[*j as usize];
+
+        let joint = BallJoint::new(Point2::origin(), Point2::new(0.0, 1.0));
+        let joint_entity = commands
+            .spawn((JointBuilderComponent::new(joint, prev, next),))
+            .current_entity()
+            .unwrap();
+        joints.push(joint_entity);
+    }
+
+    let tetromino = Tetromino { blocks, joints };
 
     commands.spawn((tetromino,));
 }
