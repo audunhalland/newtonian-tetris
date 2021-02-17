@@ -1,8 +1,7 @@
 use bevy::prelude::*;
 use bevy::render::pass::ClearColor;
 use bevy_rapier2d::physics::{
-    EventQueue, JointBuilderComponent, RapierConfiguration, RapierPhysicsPlugin,
-    RigidBodyHandleComponent,
+    JointBuilderComponent, RapierConfiguration, RapierPhysicsPlugin, RigidBodyHandleComponent,
 };
 use bevy_rapier2d::rapier::dynamics::{BallJoint, RigidBodyBuilder, RigidBodySet};
 use bevy_rapier2d::rapier::geometry::ColliderBuilder;
@@ -25,6 +24,7 @@ fn main() {
         .add_startup_system(setup_test_blocks.system())
         .add_startup_system(setup_initial_tetromino.system())
         .add_system(tetromino_movement.system())
+        .add_system(tetromino_sleep_detection.system())
         .add_plugin(RapierPhysicsPlugin)
         .run();
 }
@@ -226,7 +226,7 @@ fn spawn_tetromino(commands: &mut Commands, game: &Game) {
 fn tetromino_movement(
     keyboard_input: Res<Input<KeyCode>>,
     tetromino_query: Query<&Tetromino>,
-    mut block_query: Query<(&RigidBodyHandleComponent, &Block)>,
+    block_query: Query<&RigidBodyHandleComponent>,
     mut rigid_bodies: ResMut<RigidBodySet>,
 ) {
     for tetromino in tetromino_query.iter() {
@@ -248,7 +248,7 @@ fn tetromino_movement(
 
         if did_move {
             for block_entity in &tetromino.blocks {
-                if let Ok((rigid_body_component, _block)) = block_query.get_mut(*block_entity) {
+                if let Ok(rigid_body_component) = block_query.get(*block_entity) {
                     if let Some(rigid_body) = rigid_bodies.get_mut(rigid_body_component.handle()) {
                         if let Some(force) = left_force {
                             rigid_body.apply_force(force, true);
@@ -260,6 +260,37 @@ fn tetromino_movement(
                     }
                 }
             }
+        }
+    }
+}
+
+fn tetromino_sleep_detection(
+    commands: &mut Commands,
+    game: Res<Game>,
+    tetromino_query: Query<(Entity, &Tetromino)>,
+    block_query: Query<&RigidBodyHandleComponent>,
+    rigid_bodies: ResMut<RigidBodySet>,
+) {
+    for (tetromino_entity, tetromino) in tetromino_query.iter() {
+        let all_blocks_sleeping = tetromino.blocks.iter().all(|block_entity| {
+            if let Ok(rigid_body_component) = block_query.get(*block_entity) {
+                if let Some(rigid_body) = rigid_bodies.get(rigid_body_component.handle()) {
+                    rigid_body.is_sleeping()
+                } else {
+                    false
+                }
+            } else {
+                false
+            }
+        });
+
+        if all_blocks_sleeping {
+            for joint in &tetromino.joints {
+                commands.despawn(*joint);
+            }
+            commands.despawn(tetromino_entity);
+
+            spawn_tetromino(commands, &game);
         }
     }
 }
