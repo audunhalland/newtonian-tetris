@@ -31,6 +31,7 @@ fn main() {
 const BLOCK_PX_SIZE: f32 = 30.0;
 
 const MOVEMENT_FORCE: f32 = 10.0;
+const TORQUE: f32 = 20.0;
 
 struct Game {
     n_lanes: u8,
@@ -266,6 +267,20 @@ fn tetromino_movement(
             None
         };
 
+        let counter_clockwise_force = if keyboard_input.pressed(KeyCode::A) {
+            did_move = true;
+            Some(TORQUE)
+        } else {
+            None
+        };
+
+        let clockwise_force = if keyboard_input.pressed(KeyCode::D) {
+            did_move = true;
+            Some(-TORQUE)
+        } else {
+            None
+        };
+
         if did_move {
             for block_entity in &tetromino.blocks {
                 if let Ok(rigid_body_component) = block_query.get(*block_entity) {
@@ -276,6 +291,14 @@ fn tetromino_movement(
 
                         if let Some(force) = right_force {
                             rigid_body.apply_force(force, true);
+                        }
+
+                        if let Some(force) = counter_clockwise_force {
+                            rigid_body.apply_torque(force, true);
+                        }
+
+                        if let Some(force) = clockwise_force {
+                            rigid_body.apply_torque(force, true);
                         }
                     }
                 }
