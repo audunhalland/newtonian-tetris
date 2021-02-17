@@ -21,7 +21,6 @@ fn main() {
         .add_startup_system(setup_env.system())
         .add_startup_system(setup_game.system())
         .add_startup_system(setup_board.system())
-        .add_startup_system(setup_test_blocks.system())
         .add_startup_system(setup_initial_tetromino.system())
         .add_system(tetromino_movement.system())
         .add_system(tetromino_sleep_detection.system())
@@ -173,15 +172,6 @@ fn setup_board(
         })
         .with(RigidBodyBuilder::new_static().translation(0.0, floor_y - 0.5))
         .with(ColliderBuilder::cuboid(game.n_lanes as f32 * 0.5, 0.5));
-}
-
-fn setup_test_blocks(commands: &mut Commands, game: Res<Game>) {
-    for lane in 0..game.n_lanes {
-        for row in 0..u8::min(game.n_rows, 2) {
-            let kind = TetrominoKind::random();
-            spawn_block(commands, &game, kind, lane, row + 2);
-        }
-    }
 }
 
 fn setup_initial_tetromino(commands: &mut Commands, game: Res<Game>) {

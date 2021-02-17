@@ -508,16 +508,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "bevy_physical_tetris"
-version = "0.1.0"
-dependencies = [
- "bevy",
- "bevy_rapier2d",
- "nalgebra",
- "rand 0.8.3",
-]
-
-[[package]]
 name = "bevy_rapier2d"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3036,6 +3026,16 @@ name = "rawpointer"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "60a357793950651c4ed0f3f52338f53b2f809f32d83a07f72909fa13e4c6c1e3"
+
+[[package]]
+name = "realistic-tetris"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "bevy_rapier2d",
+ "nalgebra",
+ "rand 0.8.3",
+]
 
 [[package]]
 name = "rectangle-pack"

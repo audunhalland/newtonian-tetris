@@ -1,5 +1,5 @@
 [package]
-name = "bevy_physical_tetris"
+name = "realistic-tetris"
 version = "0.1.0"
 authors = ["Audun Halland <audun.halland@gmail.com>"]
 edition = "2018"
