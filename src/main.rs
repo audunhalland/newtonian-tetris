@@ -30,7 +30,7 @@ fn main() {
 
 const BLOCK_PX_SIZE: f32 = 30.0;
 
-const MOVEMENT_FORCE: f32 = 10.0;
+const MOVEMENT_FORCE: f32 = 20.0;
 const TORQUE: f32 = 20.0;
 
 struct Game {
