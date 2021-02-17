@@ -72,15 +72,19 @@ fn setup_env(commands: &mut Commands, mut rapier_config: ResMut<RapierConfigurat
     commands.spawn(Camera2dBundle::default());
 }
 
+fn byte_rgb(r: u8, g: u8, b: u8) -> Color {
+    Color::rgb(r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0)
+}
+
 fn setup_game(mut game: ResMut<Game>, mut materials: ResMut<Assets<ColorMaterial>>) {
     game.tetromino_colors = vec![
-        materials.add(Color::rgb(0.0, 0.0, 1.0).into()),
-        materials.add(Color::rgb(0.0, 1.0, 0.0).into()),
-        materials.add(Color::rgb(0.0, 1.0, 1.0).into()),
-        materials.add(Color::rgb(1.0, 0.0, 0.0).into()),
-        materials.add(Color::rgb(1.0, 0.0, 1.0).into()),
-        materials.add(Color::rgb(1.0, 1.0, 0.0).into()),
-        materials.add(Color::rgb(1.0, 1.0, 1.0).into()),
+        materials.add(byte_rgb(0, 244, 243).into()),
+        materials.add(byte_rgb(238, 243, 0).into()),
+        materials.add(byte_rgb(177, 0, 254).into()),
+        materials.add(byte_rgb(27, 0, 250).into()),
+        materials.add(byte_rgb(252, 157, 0).into()),
+        materials.add(byte_rgb(0, 247, 0).into()),
+        materials.add(byte_rgb(255, 0, 0).into()),
     ];
 }
 
@@ -115,8 +119,8 @@ impl TetrominoKind {
                 joints: vec![(0, 1), (1, 2), (2, 3)],
             },
             Self::O => TetrominoLayout {
-                coords: [(0, 0), (1, 0), (1, 1), (1, 0)],
-                joints: vec![(0, 1), (1, 2), (1, 2), (2, 3)],
+                coords: [(0, 0), (1, 0), (1, 1), (0, 1)],
+                joints: vec![(0, 1), (1, 2), (2, 3), (1, 0)],
             },
             Self::T => TetrominoLayout {
                 coords: [(0, 0), (1, 0), (2, 0), (1, 1)],
@@ -191,7 +195,7 @@ fn spawn_block(
     let y = game.floor_y() + row as f32 + 0.5;
 
     // Game gets more difficult when this is lower:
-    let linear_damping = 4.0;
+    let linear_damping = 3.0;
 
     let rigid_body = RigidBodyBuilder::new_dynamic()
         .translation(x, y)
