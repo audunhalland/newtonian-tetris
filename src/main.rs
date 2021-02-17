@@ -1,8 +1,12 @@
 use bevy::prelude::*;
 use bevy::render::pass::ClearColor;
-use bevy_rapier2d::physics::{JointBuilderComponent, RapierConfiguration, RapierPhysicsPlugin};
-use bevy_rapier2d::rapier::dynamics::{BallJoint, RigidBodyBuilder};
+use bevy_rapier2d::physics::{
+    EventQueue, JointBuilderComponent, RapierConfiguration, RapierPhysicsPlugin,
+    RigidBodyHandleComponent,
+};
+use bevy_rapier2d::rapier::dynamics::{BallJoint, RigidBodyBuilder, RigidBodySet};
 use bevy_rapier2d::rapier::geometry::ColliderBuilder;
+use bevy_rapier2d::rapier::na::Vector2;
 use nalgebra::Point2;
 use rand::Rng;
 
@@ -20,11 +24,14 @@ fn main() {
         .add_startup_system(setup_board.system())
         .add_startup_system(setup_test_blocks.system())
         .add_startup_system(setup_initial_tetromino.system())
+        .add_system(tetromino_movement.system())
         .add_plugin(RapierPhysicsPlugin)
         .run();
 }
 
 const BLOCK_PX_SIZE: f32 = 30.0;
+
+const MOVEMENT_FORCE: f32 = 10.0;
 
 struct Game {
     n_lanes: u8,
@@ -156,7 +163,7 @@ fn spawn_block(
     let y = game.floor_y() + row as f32 + 0.5;
 
     // Game gets more difficult when this is lower:
-    let linear_damping = 3.0;
+    let linear_damping = 4.0;
 
     let rigid_body = RigidBodyBuilder::new_dynamic()
         .translation(x, y)
@@ -214,4 +221,45 @@ fn spawn_tetromino(commands: &mut Commands, game: &Game) {
     };
 
     commands.spawn((tetromino,));
+}
+
+fn tetromino_movement(
+    keyboard_input: Res<Input<KeyCode>>,
+    tetromino_query: Query<&Tetromino>,
+    mut block_query: Query<(&RigidBodyHandleComponent, &Block)>,
+    mut rigid_bodies: ResMut<RigidBodySet>,
+) {
+    for tetromino in tetromino_query.iter() {
+        let mut did_move = false;
+
+        let left_force = if keyboard_input.pressed(KeyCode::Left) {
+            did_move = true;
+            Some(Vector2::new(-MOVEMENT_FORCE, 0.0))
+        } else {
+            None
+        };
+
+        let right_force = if keyboard_input.pressed(KeyCode::Right) {
+            did_move = true;
+            Some(Vector2::new(MOVEMENT_FORCE, 0.0))
+        } else {
+            None
+        };
+
+        if did_move {
+            for block_entity in &tetromino.blocks {
+                if let Ok((rigid_body_component, _block)) = block_query.get_mut(*block_entity) {
+                    if let Some(rigid_body) = rigid_bodies.get_mut(rigid_body_component.handle()) {
+                        if let Some(force) = left_force {
+                            rigid_body.apply_force(force, true);
+                        }
+
+                        if let Some(force) = right_force {
+                            rigid_body.apply_force(force, true);
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
