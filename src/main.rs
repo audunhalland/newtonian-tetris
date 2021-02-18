@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::{collections::HashSet, convert::TryFrom};
 
 use bevy::prelude::*;
 use bevy::render::camera::OrthographicProjection;
@@ -18,9 +18,6 @@ fn main() {
         .add_resource(ClearColor(Color::rgb(0.0, 0.0, 0.0)))
         .add_resource(Msaa::default())
         .add_plugins(DefaultPlugins)
-        // .add_plugin(bevy_winit::WinitPlugin::default())
-        // .add_plugin(bevy_wgpu::WgpuPlugin::default())
-        // .add_plugin(RapierRenderPlugin)
         .add_startup_system(setup_rapier.system())
         .add_startup_system(setup_game.system())
         .add_startup_system(setup_board.system())
@@ -317,11 +314,11 @@ fn tetromino_movement(
 fn tetromino_sleep_detection(
     commands: &mut Commands,
     mut game: ResMut<Game>,
-    block_query: Query<&RigidBodyHandleComponent>,
+    block_query: Query<(Entity, &RigidBodyHandleComponent)>,
     rigid_bodies: ResMut<RigidBodySet>,
 ) {
     let all_blocks_sleeping = game.current_tetromino_blocks.iter().all(|block_entity| {
-        if let Ok(rigid_body_component) = block_query.get(*block_entity) {
+        if let Ok((_, rigid_body_component)) = block_query.get(*block_entity) {
             if let Some(rigid_body) = rigid_bodies.get(rigid_body_component.handle()) {
                 rigid_body.is_sleeping()
             } else {
@@ -337,7 +334,47 @@ fn tetromino_sleep_detection(
             commands.despawn(*joint);
         }
 
+        clear_filled_rows(commands, &mut game, block_query, rigid_bodies);
+
         spawn_tetromino(commands, &mut game);
+    }
+}
+
+fn clear_filled_rows(
+    commands: &mut Commands,
+    game: &mut Game,
+    block_query: Query<(Entity, &RigidBodyHandleComponent)>,
+    rigid_bodies: ResMut<RigidBodySet>,
+) {
+    let mut blocks_per_row: Vec<Vec<Entity>> = (0..game.n_rows).map(|_| vec![]).collect();
+
+    let floor_y = game.floor_y();
+
+    for (block_entity, rigid_body_component) in block_query.iter() {
+        if let Some(rigid_body) = rigid_bodies.get(rigid_body_component.handle()) {
+            let floor_distance = rigid_body.position().translation.vector.y - floor_y;
+
+            // The center of a block on the floor is 0.5 above the floor, so .floor() the number ;)
+            let row = floor_distance.floor() as i32;
+
+            match u8::try_from(row) {
+                Ok(row) => {
+                    if row < game.n_rows {
+                        blocks_per_row[row as usize].push(block_entity);
+                    }
+                }
+                Err(_) => {}
+            }
+        }
+    }
+
+    for (i, row_blocks) in blocks_per_row.iter().enumerate() {
+        println!("row {} filled with {} blocks", i, row_blocks.len());
+        if row_blocks.len() == game.n_lanes as usize {
+            for block_entity in row_blocks {
+                commands.despawn(*block_entity);
+            }
+        }
     }
 }
 
