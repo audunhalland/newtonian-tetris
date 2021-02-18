@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use bevy::prelude::*;
 use bevy::render::camera::OrthographicProjection;
 use bevy::render::pass::ClearColor;
@@ -19,7 +21,7 @@ fn main() {
         // .add_plugin(bevy_winit::WinitPlugin::default())
         // .add_plugin(bevy_wgpu::WgpuPlugin::default())
         // .add_plugin(RapierRenderPlugin)
-        .add_startup_system(setup_env.system())
+        .add_startup_system(setup_rapier.system())
         .add_startup_system(setup_game.system())
         .add_startup_system(setup_board.system())
         .add_startup_system(setup_initial_tetromino.system())
@@ -39,6 +41,8 @@ struct Game {
     n_lanes: u8,
     n_rows: u8,
     tetromino_colors: Vec<Handle<ColorMaterial>>,
+    current_tetromino_blocks: HashSet<Entity>,
+    current_tetromino_joints: Vec<Entity>,
     camera: Option<Entity>,
 }
 
@@ -50,10 +54,6 @@ impl Game {
     fn left_wall_x(&self) -> f32 {
         -(self.n_lanes as f32) * 0.5
     }
-
-    fn right_wall_x(&self) -> f32 {
-        (self.n_rows as f32) * 0.5
-    }
 }
 
 impl Default for Game {
@@ -62,12 +62,14 @@ impl Default for Game {
             n_lanes: 8,
             n_rows: 20,
             tetromino_colors: vec![],
+            current_tetromino_blocks: HashSet::new(),
+            current_tetromino_joints: vec![],
             camera: None,
         }
     }
 }
 
-fn setup_env(commands: &mut Commands, mut rapier_config: ResMut<RapierConfiguration>) {
+fn setup_rapier(mut rapier_config: ResMut<RapierConfiguration>) {
     // While we want our sprite to look ~40 px square, we want to keep the physics units smaller
     // to prevent float rounding problems. To do this, we set the scale factor in RapierConfiguration
     // and divide our sprite_size by the scale.
@@ -161,11 +163,6 @@ struct TetrominoLayout {
 
 struct Block;
 
-struct Tetromino {
-    blocks: Vec<Entity>,
-    joints: Vec<Entity>,
-}
-
 fn setup_board(
     commands: &mut Commands,
     game: Res<Game>,
@@ -187,8 +184,40 @@ fn setup_board(
         .with(ColliderBuilder::cuboid(game.n_lanes as f32 * 0.5, 0.5));
 }
 
-fn setup_initial_tetromino(commands: &mut Commands, game: Res<Game>) {
-    spawn_tetromino(commands, &game);
+fn setup_initial_tetromino(commands: &mut Commands, mut game: ResMut<Game>) {
+    spawn_tetromino(commands, &mut game);
+}
+
+fn spawn_tetromino(commands: &mut Commands, game: &mut Game) {
+    let kind = TetrominoKind::random();
+    let layout = kind.layout();
+
+    let mut blocks: Vec<Entity> = vec![];
+
+    for (x, y) in layout.coords.iter() {
+        let lane = (game.n_lanes / 2) - 1 + x;
+        let row = game.n_rows - 1 - y;
+        let block_entity = spawn_block(commands, game, kind, lane, row);
+
+        blocks.push(block_entity);
+    }
+
+    let mut joints: Vec<Entity> = vec![];
+
+    for (i, j) in layout.joints.iter() {
+        let prev = blocks[*i as usize];
+        let next = blocks[*j as usize];
+
+        let joint = BallJoint::new(Point2::origin(), Point2::new(0.0, 1.0));
+        let joint_entity = commands
+            .spawn((JointBuilderComponent::new(joint, prev, next),))
+            .current_entity()
+            .unwrap();
+        joints.push(joint_entity);
+    }
+
+    game.current_tetromino_blocks = blocks.into_iter().collect();
+    game.current_tetromino_joints = joints;
 }
 
 fn spawn_block(
@@ -224,94 +253,60 @@ fn spawn_block(
         .unwrap()
 }
 
-fn spawn_tetromino(commands: &mut Commands, game: &Game) {
-    let kind = TetrominoKind::random();
-    let layout = kind.layout();
-
-    let mut blocks: Vec<Entity> = vec![];
-    let mut joints: Vec<Entity> = vec![];
-
-    for (x, y) in layout.coords.iter() {
-        let lane = (game.n_lanes / 2) - 1 + x;
-        let row = game.n_rows - 1 - y;
-        let block_entity = spawn_block(commands, game, kind, lane, row);
-
-        blocks.push(block_entity);
-    }
-
-    for (i, j) in layout.joints.iter() {
-        let prev = blocks[*i as usize];
-        let next = blocks[*j as usize];
-
-        let joint = BallJoint::new(Point2::origin(), Point2::new(0.0, 1.0));
-        let joint_entity = commands
-            .spawn((JointBuilderComponent::new(joint, prev, next),))
-            .current_entity()
-            .unwrap();
-        joints.push(joint_entity);
-    }
-
-    let tetromino = Tetromino { blocks, joints };
-
-    commands.spawn((tetromino,));
-}
-
 fn tetromino_movement(
     keyboard_input: Res<Input<KeyCode>>,
-    tetromino_query: Query<&Tetromino>,
+    game: Res<Game>,
     block_query: Query<&RigidBodyHandleComponent>,
     mut rigid_bodies: ResMut<RigidBodySet>,
 ) {
-    for tetromino in tetromino_query.iter() {
-        let mut did_move = false;
+    let mut did_move = false;
 
-        let left_force = if keyboard_input.pressed(KeyCode::Left) {
-            did_move = true;
-            Some(Vector2::new(-MOVEMENT_FORCE, 0.0))
-        } else {
-            None
-        };
+    let left_force = if keyboard_input.pressed(KeyCode::Left) {
+        did_move = true;
+        Some(Vector2::new(-MOVEMENT_FORCE, 0.0))
+    } else {
+        None
+    };
 
-        let right_force = if keyboard_input.pressed(KeyCode::Right) {
-            did_move = true;
-            Some(Vector2::new(MOVEMENT_FORCE, 0.0))
-        } else {
-            None
-        };
+    let right_force = if keyboard_input.pressed(KeyCode::Right) {
+        did_move = true;
+        Some(Vector2::new(MOVEMENT_FORCE, 0.0))
+    } else {
+        None
+    };
 
-        let counter_clockwise_force = if keyboard_input.pressed(KeyCode::A) {
-            did_move = true;
-            Some(TORQUE)
-        } else {
-            None
-        };
+    let counter_clockwise_force = if keyboard_input.pressed(KeyCode::A) {
+        did_move = true;
+        Some(TORQUE)
+    } else {
+        None
+    };
 
-        let clockwise_force = if keyboard_input.pressed(KeyCode::D) {
-            did_move = true;
-            Some(-TORQUE)
-        } else {
-            None
-        };
+    let clockwise_force = if keyboard_input.pressed(KeyCode::D) {
+        did_move = true;
+        Some(-TORQUE)
+    } else {
+        None
+    };
 
-        if did_move {
-            for block_entity in &tetromino.blocks {
-                if let Ok(rigid_body_component) = block_query.get(*block_entity) {
-                    if let Some(rigid_body) = rigid_bodies.get_mut(rigid_body_component.handle()) {
-                        if let Some(force) = left_force {
-                            rigid_body.apply_force(force, true);
-                        }
+    if did_move {
+        for block_entity in &game.current_tetromino_blocks {
+            if let Ok(rigid_body_component) = block_query.get(*block_entity) {
+                if let Some(rigid_body) = rigid_bodies.get_mut(rigid_body_component.handle()) {
+                    if let Some(force) = left_force {
+                        rigid_body.apply_force(force, true);
+                    }
 
-                        if let Some(force) = right_force {
-                            rigid_body.apply_force(force, true);
-                        }
+                    if let Some(force) = right_force {
+                        rigid_body.apply_force(force, true);
+                    }
 
-                        if let Some(force) = counter_clockwise_force {
-                            rigid_body.apply_torque(force, true);
-                        }
+                    if let Some(force) = counter_clockwise_force {
+                        rigid_body.apply_torque(force, true);
+                    }
 
-                        if let Some(force) = clockwise_force {
-                            rigid_body.apply_torque(force, true);
-                        }
+                    if let Some(force) = clockwise_force {
+                        rigid_body.apply_torque(force, true);
                     }
                 }
             }
@@ -321,37 +316,34 @@ fn tetromino_movement(
 
 fn tetromino_sleep_detection(
     commands: &mut Commands,
-    game: Res<Game>,
-    tetromino_query: Query<(Entity, &Tetromino)>,
+    mut game: ResMut<Game>,
     block_query: Query<&RigidBodyHandleComponent>,
     rigid_bodies: ResMut<RigidBodySet>,
 ) {
-    for (tetromino_entity, tetromino) in tetromino_query.iter() {
-        let all_blocks_sleeping = tetromino.blocks.iter().all(|block_entity| {
-            if let Ok(rigid_body_component) = block_query.get(*block_entity) {
-                if let Some(rigid_body) = rigid_bodies.get(rigid_body_component.handle()) {
-                    rigid_body.is_sleeping()
-                } else {
-                    false
-                }
+    let all_blocks_sleeping = game.current_tetromino_blocks.iter().all(|block_entity| {
+        if let Ok(rigid_body_component) = block_query.get(*block_entity) {
+            if let Some(rigid_body) = rigid_bodies.get(rigid_body_component.handle()) {
+                rigid_body.is_sleeping()
             } else {
                 false
             }
-        });
-
-        if all_blocks_sleeping {
-            for joint in &tetromino.joints {
-                commands.despawn(*joint);
-            }
-            commands.despawn(tetromino_entity);
-
-            spawn_tetromino(commands, &game);
+        } else {
+            false
         }
+    });
+
+    if all_blocks_sleeping {
+        for joint in &game.current_tetromino_joints {
+            commands.despawn(*joint);
+        }
+
+        spawn_tetromino(commands, &mut game);
     }
 }
 
 fn block_death_detection(
     commands: &mut Commands,
+    game: ResMut<Game>,
     projection_query: Query<&OrthographicProjection>,
     block_query: Query<(Entity, &Transform, &Block)>,
 ) {
@@ -360,6 +352,10 @@ fn block_death_detection(
 
         for (block_entity, transform, _) in block_query.iter() {
             if transform.translation.y < outside_limit {
+                if game.current_tetromino_blocks.contains(&block_entity) {
+                    // TODO: Tetromino died. Game over.
+                }
+
                 commands.despawn(block_entity);
             }
         }
