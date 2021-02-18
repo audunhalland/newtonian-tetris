@@ -334,9 +334,11 @@ fn tetromino_sleep_detection(
             commands.despawn(*joint);
         }
 
-        clear_filled_rows(commands, &mut game, block_query, rigid_bodies);
+        clear_filled_rows(commands, &mut game, block_query, &rigid_bodies);
 
         spawn_tetromino(commands, &mut game);
+
+        println!("rigid_body_count: {}", rigid_bodies.len());
     }
 }
 
@@ -344,7 +346,7 @@ fn clear_filled_rows(
     commands: &mut Commands,
     game: &mut Game,
     block_query: Query<(Entity, &RigidBodyHandleComponent)>,
-    rigid_bodies: ResMut<RigidBodySet>,
+    rigid_bodies: &RigidBodySet,
 ) {
     let mut blocks_per_row: Vec<Vec<Entity>> = (0..game.n_rows).map(|_| vec![]).collect();
 
@@ -352,6 +354,12 @@ fn clear_filled_rows(
 
     for (block_entity, rigid_body_component) in block_query.iter() {
         if let Some(rigid_body) = rigid_bodies.get(rigid_body_component.handle()) {
+            // Only sleeping blocks count.. So disregard blocks "falling off"
+            // that are in the row
+            if !rigid_body.is_sleeping() {
+                continue;
+            }
+
             let floor_distance = rigid_body.position().translation.vector.y - floor_y;
 
             // The center of a block on the floor is 0.5 above the floor, so .floor() the number ;)
@@ -368,11 +376,10 @@ fn clear_filled_rows(
         }
     }
 
-    for (i, row_blocks) in blocks_per_row.iter().enumerate() {
-        println!("row {} filled with {} blocks", i, row_blocks.len());
+    for row_blocks in blocks_per_row {
         if row_blocks.len() == game.n_lanes as usize {
             for block_entity in row_blocks {
-                commands.despawn(*block_entity);
+                commands.despawn(block_entity);
             }
         }
     }
