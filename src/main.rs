@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+use bevy::render::camera::OrthographicProjection;
 use bevy::render::pass::ClearColor;
 use bevy_rapier2d::physics::{
     JointBuilderComponent, RapierConfiguration, RapierPhysicsPlugin, RigidBodyHandleComponent,
@@ -23,6 +24,7 @@ fn main() {
         .add_startup_system(setup_board.system())
         .add_startup_system(setup_initial_tetromino.system())
         .add_system(tetromino_movement.system())
+        .add_system(block_death_detection.system())
         .add_system(tetromino_sleep_detection.system())
         .add_plugin(RapierPhysicsPlugin)
         .run();
@@ -37,6 +39,7 @@ struct Game {
     n_lanes: u8,
     n_rows: u8,
     tetromino_colors: Vec<Handle<ColorMaterial>>,
+    camera: Option<Entity>,
 }
 
 impl Game {
@@ -59,6 +62,7 @@ impl Default for Game {
             n_lanes: 8,
             n_rows: 20,
             tetromino_colors: vec![],
+            camera: None,
         }
     }
 }
@@ -68,15 +72,17 @@ fn setup_env(commands: &mut Commands, mut rapier_config: ResMut<RapierConfigurat
     // to prevent float rounding problems. To do this, we set the scale factor in RapierConfiguration
     // and divide our sprite_size by the scale.
     rapier_config.scale = BLOCK_PX_SIZE;
-
-    commands.spawn(Camera2dBundle::default());
 }
 
 fn byte_rgb(r: u8, g: u8, b: u8) -> Color {
     Color::rgb(r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0)
 }
 
-fn setup_game(mut game: ResMut<Game>, mut materials: ResMut<Assets<ColorMaterial>>) {
+fn setup_game(
+    commands: &mut Commands,
+    mut game: ResMut<Game>,
+    mut materials: ResMut<Assets<ColorMaterial>>,
+) {
     game.tetromino_colors = vec![
         materials.add(byte_rgb(0, 244, 243).into()),
         materials.add(byte_rgb(238, 243, 0).into()),
@@ -86,6 +92,8 @@ fn setup_game(mut game: ResMut<Game>, mut materials: ResMut<Assets<ColorMaterial
         materials.add(byte_rgb(0, 247, 0).into()),
         materials.add(byte_rgb(255, 0, 0).into()),
     ];
+
+    game.camera = commands.spawn(Camera2dBundle::default()).current_entity();
 }
 
 #[derive(Clone, Copy)]
@@ -338,6 +346,22 @@ fn tetromino_sleep_detection(
             commands.despawn(tetromino_entity);
 
             spawn_tetromino(commands, &game);
+        }
+    }
+}
+
+fn block_death_detection(
+    commands: &mut Commands,
+    projection_query: Query<&OrthographicProjection>,
+    block_query: Query<(Entity, &Transform, &Block)>,
+) {
+    for projection in projection_query.iter() {
+        let outside_limit = projection.bottom - BLOCK_PX_SIZE * 2.0;
+
+        for (block_entity, transform, _) in block_query.iter() {
+            if transform.translation.y < outside_limit {
+                commands.despawn(block_entity);
+            }
         }
     }
 }
