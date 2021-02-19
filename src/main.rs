@@ -25,18 +25,50 @@ fn main() {
         .add_system(tetromino_movement.system())
         .add_system(block_death_detection.system())
         .add_system(tetromino_sleep_detection.system())
+        .add_system(update_health_bar.system())
         .add_plugin(RapierPhysicsPlugin)
         .run();
 }
 
 const BLOCK_PX_SIZE: f32 = 30.0;
 
+// In terms of block size:
+const FLOOR_BLOCK_HEIGHT: f32 = 2.0;
+const HEALTH_BAR_HEIGHT: f32 = 0.5;
+
 const MOVEMENT_FORCE: f32 = 20.0;
 const TORQUE: f32 = 20.0;
+
+#[derive(Default)]
+struct Stats {
+    generated_blocks: i32,
+    cleared_blocks: i32,
+    lost_blocks: i32,
+    lost_tetromino: bool,
+}
+
+impl Stats {
+    fn health(&self) -> f32 {
+        if self.lost_tetromino {
+            0.0
+        } else if self.cleared_blocks == 0 {
+            if self.lost_blocks > 0 {
+                0.0
+            } else {
+                1.0
+            }
+        } else {
+            let lost_ratio = self.lost_blocks as f32 / self.cleared_blocks as f32;
+
+            1.0 - lost_ratio
+        }
+    }
+}
 
 struct Game {
     n_lanes: u8,
     n_rows: u8,
+    stats: Stats,
     tetromino_colors: Vec<Handle<ColorMaterial>>,
     current_tetromino_blocks: HashSet<Entity>,
     current_tetromino_joints: Vec<Entity>,
@@ -56,8 +88,9 @@ impl Game {
 impl Default for Game {
     fn default() -> Self {
         Self {
-            n_lanes: 8,
+            n_lanes: 10,
             n_rows: 20,
+            stats: Stats::default(),
             tetromino_colors: vec![],
             current_tetromino_blocks: HashSet::new(),
             current_tetromino_joints: vec![],
@@ -160,6 +193,10 @@ struct TetrominoLayout {
 
 struct Block;
 
+struct HealthBar {
+    value: f32,
+}
+
 fn setup_board(
     commands: &mut Commands,
     game: Res<Game>,
@@ -173,12 +210,36 @@ fn setup_board(
             material: materials.add(Color::rgb(0.5, 0.5, 0.5).into()),
             sprite: Sprite::new(Vec2::new(
                 game.n_lanes as f32 * BLOCK_PX_SIZE,
-                BLOCK_PX_SIZE,
+                FLOOR_BLOCK_HEIGHT * BLOCK_PX_SIZE,
             )),
             ..Default::default()
         })
-        .with(RigidBodyBuilder::new_static().translation(0.0, floor_y - 0.5))
-        .with(ColliderBuilder::cuboid(game.n_lanes as f32 * 0.5, 0.5));
+        .with(RigidBodyBuilder::new_static().translation(0.0, floor_y - (FLOOR_BLOCK_HEIGHT * 0.5)))
+        .with(ColliderBuilder::cuboid(
+            game.n_lanes as f32 * 0.5,
+            FLOOR_BLOCK_HEIGHT * 0.5,
+        ));
+
+    // Add health bar
+    commands
+        .spawn(SpriteBundle {
+            material: materials.add(Color::rgb(1.0, 1.0, 1.0).into()),
+            sprite: Sprite::new(Vec2::new(
+                (game.n_lanes as f32 - 2.0) * BLOCK_PX_SIZE,
+                BLOCK_PX_SIZE * HEALTH_BAR_HEIGHT,
+            )),
+            transform: Transform {
+                translation: Vec3::new(
+                    (game.left_wall_x() + 1.0) * BLOCK_PX_SIZE,
+                    (floor_y - (FLOOR_BLOCK_HEIGHT / 2.0)) * BLOCK_PX_SIZE,
+                    2.0,
+                ),
+                rotation: Quat::identity(),
+                scale: Vec3::new(0.0, 1.0, 1.0),
+            },
+            ..Default::default()
+        })
+        .with(HealthBar { value: 0.0 });
 }
 
 fn setup_initial_tetromino(commands: &mut Commands, mut game: ResMut<Game>) {
@@ -212,6 +273,8 @@ fn spawn_tetromino(commands: &mut Commands, game: &mut Game) {
             .unwrap();
         joints.push(joint_entity);
     }
+
+    game.stats.generated_blocks += blocks.len() as i32;
 
     game.current_tetromino_blocks = blocks.into_iter().collect();
     game.current_tetromino_joints = joints;
@@ -336,9 +399,9 @@ fn tetromino_sleep_detection(
 
         clear_filled_rows(commands, &mut game, block_query, &rigid_bodies);
 
-        spawn_tetromino(commands, &mut game);
-
-        println!("rigid_body_count: {}", rigid_bodies.len());
+        if game.stats.health() > 0.0 {
+            spawn_tetromino(commands, &mut game);
+        }
     }
 }
 
@@ -378,6 +441,8 @@ fn clear_filled_rows(
 
     for row_blocks in blocks_per_row {
         if row_blocks.len() == game.n_lanes as usize {
+            game.stats.cleared_blocks += game.n_lanes as i32;
+
             for block_entity in row_blocks {
                 commands.despawn(block_entity);
             }
@@ -387,7 +452,7 @@ fn clear_filled_rows(
 
 fn block_death_detection(
     commands: &mut Commands,
-    game: ResMut<Game>,
+    mut game: ResMut<Game>,
     projection_query: Query<&OrthographicProjection>,
     block_query: Query<(Entity, &Transform, &Block)>,
 ) {
@@ -397,11 +462,30 @@ fn block_death_detection(
         for (block_entity, transform, _) in block_query.iter() {
             if transform.translation.y < outside_limit {
                 if game.current_tetromino_blocks.contains(&block_entity) {
-                    // TODO: Tetromino died. Game over.
+                    game.stats.lost_tetromino = true;
                 }
 
+                game.stats.lost_blocks += 1;
                 commands.despawn(block_entity);
             }
         }
+    }
+}
+
+fn update_health_bar(
+    game: Res<Game>,
+    mut health_bar_query: Query<(&mut HealthBar, &mut Transform)>,
+) {
+    let health = game.stats.health();
+
+    let half_width = (game.n_lanes - 2) as f32 * 0.5;
+
+    for (mut healthbar, mut transform) in health_bar_query.iter_mut() {
+        let delta = health - healthbar.value;
+        healthbar.value += delta * 0.1;
+
+        transform.translation.x =
+            ((game.left_wall_x() + 1.0) + half_width * healthbar.value) * BLOCK_PX_SIZE;
+        transform.scale.x = healthbar.value;
     }
 }
