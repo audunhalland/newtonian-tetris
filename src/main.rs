@@ -319,60 +319,23 @@ fn spawn_block(
 }
 
 fn tetromino_movement(
-    keyboard_input: Res<Input<KeyCode>>,
+    input: Res<Input<KeyCode>>,
     game: Res<Game>,
     block_query: Query<&RigidBodyHandleComponent>,
     mut rigid_bodies: ResMut<RigidBodySet>,
 ) {
-    let mut did_move = false;
+    let movement = input.pressed(KeyCode::Right) as i8 - input.pressed(KeyCode::Left) as i8;
+    let torque = input.pressed(KeyCode::A) as i8 - input.pressed(KeyCode::D) as i8;
 
-    let left_force = if keyboard_input.pressed(KeyCode::Left) {
-        did_move = true;
-        Some(Vector2::new(-MOVEMENT_FORCE, 0.0))
-    } else {
-        None
-    };
-
-    let right_force = if keyboard_input.pressed(KeyCode::Right) {
-        did_move = true;
-        Some(Vector2::new(MOVEMENT_FORCE, 0.0))
-    } else {
-        None
-    };
-
-    let counter_clockwise_force = if keyboard_input.pressed(KeyCode::A) {
-        did_move = true;
-        Some(TORQUE)
-    } else {
-        None
-    };
-
-    let clockwise_force = if keyboard_input.pressed(KeyCode::D) {
-        did_move = true;
-        Some(-TORQUE)
-    } else {
-        None
-    };
-
-    if did_move {
-        for block_entity in &game.current_tetromino_blocks {
-            if let Ok(rigid_body_component) = block_query.get(*block_entity) {
-                if let Some(rigid_body) = rigid_bodies.get_mut(rigid_body_component.handle()) {
-                    if let Some(force) = left_force {
-                        rigid_body.apply_force(force, true);
-                    }
-
-                    if let Some(force) = right_force {
-                        rigid_body.apply_force(force, true);
-                    }
-
-                    if let Some(force) = counter_clockwise_force {
-                        rigid_body.apply_torque(force, true);
-                    }
-
-                    if let Some(force) = clockwise_force {
-                        rigid_body.apply_torque(force, true);
-                    }
+    for block_entity in &game.current_tetromino_blocks {
+        if let Ok(rigid_body_component) = block_query.get(*block_entity) {
+            if let Some(rigid_body) = rigid_bodies.get_mut(rigid_body_component.handle()) {
+                if movement != 0 {
+                    rigid_body
+                        .apply_force(Vector2::new(movement as f32 * MOVEMENT_FORCE, 0.0), true);
+                }
+                if torque != 0 {
+                    rigid_body.apply_torque(torque as f32 * TORQUE, true);
                 }
             }
         }
