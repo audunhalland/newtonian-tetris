@@ -66,8 +66,8 @@ impl Stats {
 }
 
 struct Game {
-    n_lanes: u8,
-    n_rows: u8,
+    n_lanes: usize,
+    n_rows: usize,
     stats: Stats,
     tetromino_colors: Vec<Handle<ColorMaterial>>,
     current_tetromino_blocks: HashSet<Entity>,
@@ -128,7 +128,7 @@ fn setup_game(
     game.camera = commands.spawn(Camera2dBundle::default()).current_entity();
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 enum TetrominoKind {
     I,
     O,
@@ -155,31 +155,31 @@ impl TetrominoKind {
     fn layout(&self) -> TetrominoLayout {
         match self {
             Self::I => TetrominoLayout {
-                coords: [(1, 0), (1, 1), (1, 2), (1, 3)],
+                coords: [(1, 1), (1, 0), (1, -1), (1, -2)],
                 joints: vec![(0, 1), (1, 2), (2, 3)],
             },
             Self::O => TetrominoLayout {
-                coords: [(0, 0), (1, 0), (1, 1), (0, 1)],
+                coords: [(0, 0), (1, 0), (1, -1), (0, -1)],
                 joints: vec![(0, 1), (1, 2), (2, 3), (1, 0)],
             },
             Self::T => TetrominoLayout {
-                coords: [(0, 0), (1, 0), (2, 0), (1, 1)],
+                coords: [(0, 0), (1, 0), (2, 0), (1, -1)],
                 joints: vec![(0, 1), (1, 2), (1, 3)],
             },
             Self::J => TetrominoLayout {
-                coords: [(1, 0), (1, 1), (1, 2), (0, 2)],
+                coords: [(1, 0), (1, -1), (1, -2), (0, -2)],
                 joints: vec![(0, 1), (1, 2), (2, 3)],
             },
             Self::L => TetrominoLayout {
-                coords: [(1, 0), (1, 1), (1, 2), (2, 2)],
+                coords: [(1, 0), (1, -1), (1, -2), (2, -2)],
                 joints: vec![(0, 1), (1, 2), (2, 3)],
             },
             Self::S => TetrominoLayout {
-                coords: [(0, 1), (1, 1), (1, 0), (2, 0)],
+                coords: [(0, -1), (1, -1), (1, 0), (2, 0)],
                 joints: vec![(0, 1), (1, 2), (2, 3)],
             },
             Self::Z => TetrominoLayout {
-                coords: [(0, 0), (1, 0), (1, 1), (2, 1)],
+                coords: [(0, 0), (1, 0), (1, -1), (2, -1)],
                 joints: vec![(0, 1), (1, 2), (2, 3)],
             },
         }
@@ -187,8 +187,8 @@ impl TetrominoKind {
 }
 
 struct TetrominoLayout {
-    coords: [(u8, u8); 4],
-    joints: Vec<(u8, u8)>,
+    coords: [(i32, i32); 4],
+    joints: Vec<(usize, usize)>,
 }
 
 struct Block;
@@ -248,44 +248,49 @@ fn setup_initial_tetromino(commands: &mut Commands, mut game: ResMut<Game>) {
 
 fn spawn_tetromino(commands: &mut Commands, game: &mut Game) {
     let kind = TetrominoKind::random();
-    let layout = kind.layout();
+    let TetrominoLayout { coords, joints } = kind.layout();
 
-    let mut blocks: Vec<Entity> = vec![];
+    let block_entities: Vec<Entity> = coords
+        .iter()
+        .map(|(x, y)| {
+            let lane = (game.n_lanes as i32 / 2) - 1 + x;
+            let row = game.n_rows as i32 - 1 + y;
+            spawn_block(commands, game, kind, lane, row)
+        })
+        .collect();
 
-    for (x, y) in layout.coords.iter() {
-        let lane = (game.n_lanes / 2) - 1 + x;
-        let row = game.n_rows - 1 - y;
-        let block_entity = spawn_block(commands, game, kind, lane, row);
+    let joint_entities: Vec<Entity> = joints
+        .iter()
+        .map(|(i, j)| {
+            let x_dir = coords[*j].0 as f32 - coords[*i].0 as f32;
+            let y_dir = coords[*j].1 as f32 - coords[*i].1 as f32;
 
-        blocks.push(block_entity);
-    }
+            let anchor_1 = Point2::new(x_dir * 0.5, y_dir * 0.5);
+            let anchor_2 = Point2::new(x_dir * -0.5, y_dir * -0.5);
 
-    let mut joints: Vec<Entity> = vec![];
+            commands
+                .spawn((JointBuilderComponent::new(
+                    BallJoint::new(anchor_1, anchor_2),
+                    block_entities[*i],
+                    block_entities[*j],
+                ),))
+                .current_entity()
+                .unwrap()
+        })
+        .collect();
 
-    for (i, j) in layout.joints.iter() {
-        let prev = blocks[*i as usize];
-        let next = blocks[*j as usize];
+    game.stats.generated_blocks += block_entities.len() as i32;
 
-        let joint = BallJoint::new(Point2::origin(), Point2::new(0.0, 1.0));
-        let joint_entity = commands
-            .spawn((JointBuilderComponent::new(joint, prev, next),))
-            .current_entity()
-            .unwrap();
-        joints.push(joint_entity);
-    }
-
-    game.stats.generated_blocks += blocks.len() as i32;
-
-    game.current_tetromino_blocks = blocks.into_iter().collect();
-    game.current_tetromino_joints = joints;
+    game.current_tetromino_blocks = block_entities.into_iter().collect();
+    game.current_tetromino_joints = joint_entities;
 }
 
 fn spawn_block(
     commands: &mut Commands,
     game: &Game,
     kind: TetrominoKind,
-    lane: u8,
-    row: u8,
+    lane: i32,
+    row: i32,
 ) -> Entity {
     // x, y is the center of the block
     let x = game.left_wall_x() + lane as f32 + 0.5;
@@ -428,7 +433,7 @@ fn clear_filled_rows(
             // The center of a block on the floor is 0.5 above the floor, so .floor() the number ;)
             let row = floor_distance.floor() as i32;
 
-            match u8::try_from(row) {
+            match usize::try_from(row) {
                 Ok(row) => {
                     if row < game.n_rows {
                         blocks_per_row[row as usize].push(block_entity);
