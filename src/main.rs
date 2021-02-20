@@ -6,7 +6,7 @@ use bevy::render::pass::ClearColor;
 use bevy_rapier2d::physics::{
     JointBuilderComponent, RapierConfiguration, RapierPhysicsPlugin, RigidBodyHandleComponent,
 };
-use bevy_rapier2d::rapier::dynamics::{BallJoint, RigidBodyBuilder, RigidBodySet};
+use bevy_rapier2d::rapier::dynamics::{BallJoint, RigidBody, RigidBodyBuilder, RigidBodySet};
 use bevy_rapier2d::rapier::geometry::ColliderBuilder;
 use bevy_rapier2d::rapier::na::Vector2;
 use nalgebra::Point2;
@@ -349,15 +349,12 @@ fn tetromino_sleep_detection(
     rigid_bodies: ResMut<RigidBodySet>,
 ) {
     let all_blocks_sleeping = game.current_tetromino_blocks.iter().all(|block_entity| {
-        if let Ok((_, rigid_body_component)) = block_query.get(*block_entity) {
-            if let Some(rigid_body) = rigid_bodies.get(rigid_body_component.handle()) {
-                rigid_body.is_sleeping()
-            } else {
-                false
-            }
-        } else {
-            false
-        }
+        block_query
+            .get(*block_entity)
+            .ok()
+            .and_then(|(_, rigid_body_component)| rigid_bodies.get(rigid_body_component.handle()))
+            .map(RigidBody::is_sleeping)
+            .unwrap_or(false)
     });
 
     if all_blocks_sleeping {
