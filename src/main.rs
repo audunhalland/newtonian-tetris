@@ -1,4 +1,4 @@
-use std::{collections::HashSet, convert::TryFrom};
+use std::collections::HashSet;
 
 use bevy::prelude::*;
 use bevy::render::camera::OrthographicProjection;
@@ -393,13 +393,8 @@ fn clear_filled_rows(
             // The center of a block on the floor is 0.5 above the floor, so .floor() the number ;)
             let row = floor_distance.floor() as i32;
 
-            match usize::try_from(row) {
-                Ok(row) => {
-                    if row < game.n_rows {
-                        blocks_per_row[row as usize].push(block_entity);
-                    }
-                }
-                Err(_) => {}
+            if row >= 0 && row < game.n_rows as i32 {
+                blocks_per_row[row as usize].push(block_entity);
             }
         }
     }
