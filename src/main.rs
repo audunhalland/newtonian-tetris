@@ -4,6 +4,7 @@ use bevy::prelude::*;
 use bevy::render::camera::OrthographicProjection;
 use bevy::render::pass::ClearColor;
 use bevy_rapier2d::physics::NoUserData;
+use bevy_rapier2d::physics::RigidBodyPositionSync;
 use bevy_rapier2d::physics::{ColliderBundle, RigidBodyBundle};
 use bevy_rapier2d::physics::{JointBuilderComponent, RapierConfiguration, RapierPhysicsPlugin};
 use bevy_rapier2d::prelude::ColliderShape;
@@ -230,7 +231,8 @@ fn setup_board(commands: &mut Commands, game: &Game, mut materials: ResMut<Asset
         .insert_bundle(ColliderBundle {
             shape: ColliderShape::cuboid(game.n_lanes as f32 * 0.5, FLOOR_BLOCK_HEIGHT * 0.5),
             ..ColliderBundle::default()
-        });
+        })
+        .insert(RigidBodyPositionSync::Discrete);
 
     // Add health bar
     commands
@@ -327,6 +329,7 @@ fn spawn_block(
             shape: ColliderShape::cuboid(0.5, 0.5),
             ..ColliderBundle::default()
         })
+        .insert(RigidBodyPositionSync::Discrete)
         .insert(Block)
         .id()
 }
