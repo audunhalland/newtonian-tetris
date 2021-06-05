@@ -23,10 +23,7 @@ fn main() {
         .insert_resource(ClearColor(Color::rgb(0.0, 0.0, 0.0)))
         .insert_resource(Msaa::default())
         .add_plugins(DefaultPlugins)
-        .add_startup_system(setup_rapier.system())
         .add_startup_system(setup_game.system())
-        .add_startup_system(setup_board.system())
-        .add_startup_system(setup_initial_tetromino.system())
         .add_system(tetromino_movement.system())
         .add_system(block_death_detection.system())
         .add_system(tetromino_sleep_detection.system())
@@ -104,13 +101,6 @@ impl Default for Game {
     }
 }
 
-fn setup_rapier(mut rapier_config: ResMut<RapierConfiguration>) {
-    // While we want our sprite to look ~40 px square, we want to keep the physics units smaller
-    // to prevent float rounding problems. To do this, we set the scale factor in RapierConfiguration
-    // and divide our sprite_size by the scale.
-    rapier_config.scale = BLOCK_PX_SIZE;
-}
-
 fn byte_rgb(r: u8, g: u8, b: u8) -> Color {
     Color::rgb(r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0)
 }
@@ -118,8 +108,14 @@ fn byte_rgb(r: u8, g: u8, b: u8) -> Color {
 fn setup_game(
     mut commands: Commands,
     mut game: ResMut<Game>,
+    mut rapier_config: ResMut<RapierConfiguration>,
     mut materials: ResMut<Assets<ColorMaterial>>,
 ) {
+    // While we want our sprite to look ~40 px square, we want to keep the physics units smaller
+    // to prevent float rounding problems. To do this, we set the scale factor in RapierConfiguration
+    // and divide our sprite_size by the scale.
+    rapier_config.scale = BLOCK_PX_SIZE;
+
     game.tetromino_colors = vec![
         materials.add(byte_rgb(0, 244, 243).into()),
         materials.add(byte_rgb(238, 243, 0).into()),
@@ -136,6 +132,11 @@ fn setup_game(
             .insert_bundle(OrthographicCameraBundle::new_2d())
             .id(),
     );
+
+    setup_board(&mut commands, &*game, materials);
+
+    // initial tetromino
+    spawn_tetromino(&mut commands, &mut game);
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -207,11 +208,7 @@ struct HealthBar {
     value: f32,
 }
 
-fn setup_board(
-    mut commands: Commands,
-    game: Res<Game>,
-    mut materials: ResMut<Assets<ColorMaterial>>,
-) {
+fn setup_board(commands: &mut Commands, game: &Game, mut materials: ResMut<Assets<ColorMaterial>>) {
     let floor_y = game.floor_y();
 
     // Add floor
@@ -256,10 +253,6 @@ fn setup_board(
             ..Default::default()
         })
         .insert(HealthBar { value: 0.0 });
-}
-
-fn setup_initial_tetromino(mut commands: Commands, mut game: ResMut<Game>) {
-    spawn_tetromino(&mut commands, &mut game);
 }
 
 fn spawn_tetromino(commands: &mut Commands, game: &mut Game) {
