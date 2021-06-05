@@ -3,20 +3,7 @@ use std::collections::HashSet;
 use bevy::prelude::*;
 use bevy::render::camera::OrthographicProjection;
 use bevy::render::pass::ClearColor;
-use bevy_rapier2d::physics::NoUserData;
-use bevy_rapier2d::physics::RigidBodyPositionSync;
-use bevy_rapier2d::physics::{ColliderBundle, RigidBodyBundle};
-use bevy_rapier2d::physics::{JointBuilderComponent, RapierConfiguration, RapierPhysicsPlugin};
-use bevy_rapier2d::prelude::ColliderShape;
-use bevy_rapier2d::prelude::RigidBodyActivation;
-use bevy_rapier2d::prelude::RigidBodyDamping;
-use bevy_rapier2d::prelude::RigidBodyForces;
-use bevy_rapier2d::prelude::RigidBodyMassProps;
-use bevy_rapier2d::prelude::RigidBodyPosition;
-use bevy_rapier2d::prelude::RigidBodyVelocity;
-use bevy_rapier2d::rapier::dynamics::BallJoint;
-// use bevy_rapier2d::rapier::geometry::ColliderBuilder;
-use nalgebra::Point2;
+use bevy_rapier2d::prelude::*;
 use rand::Rng;
 
 fn main() {
@@ -277,8 +264,8 @@ fn spawn_tetromino(commands: &mut Commands, game: &mut Game) {
             let x_dir = coords[*j].0 as f32 - coords[*i].0 as f32;
             let y_dir = coords[*j].1 as f32 - coords[*i].1 as f32;
 
-            let anchor_1 = Point2::new(x_dir * 0.5, y_dir * 0.5);
-            let anchor_2 = Point2::new(x_dir * -0.5, y_dir * -0.5);
+            let anchor_1 = Vec2::new(x_dir * 0.5, y_dir * 0.5).into();
+            let anchor_2 = Vec2::new(x_dir * -0.5, y_dir * -0.5).into();
 
             commands
                 .spawn()
@@ -358,7 +345,7 @@ fn tetromino_movement(
 fn tetromino_sleep_detection(
     mut commands: Commands,
     mut game: ResMut<Game>,
-    block_query: Query<(Entity, &RigidBodyActivation, &RigidBodyPosition)>, // rigid_bodies: ResMut<RigidBodySet>,
+    block_query: Query<(Entity, &RigidBodyActivation, &RigidBodyPosition)>,
 ) {
     let all_blocks_sleeping = game.current_tetromino_blocks.iter().all(|block_entity| {
         block_query
