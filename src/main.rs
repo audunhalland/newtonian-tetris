@@ -3,20 +3,25 @@ use std::collections::HashSet;
 use bevy::prelude::*;
 use bevy::render::camera::OrthographicProjection;
 use bevy::render::pass::ClearColor;
-use bevy_rapier2d::physics::{
-    JointBuilderComponent, RapierConfiguration, RapierPhysicsPlugin, RigidBodyHandleComponent,
-};
-use bevy_rapier2d::rapier::dynamics::{BallJoint, RigidBody, RigidBodyBuilder, RigidBodySet};
-use bevy_rapier2d::rapier::geometry::ColliderBuilder;
-use bevy_rapier2d::rapier::na::Vector2;
+use bevy_rapier2d::physics::NoUserData;
+use bevy_rapier2d::physics::{ColliderBundle, RigidBodyBundle};
+use bevy_rapier2d::physics::{JointBuilderComponent, RapierConfiguration, RapierPhysicsPlugin};
+use bevy_rapier2d::prelude::ColliderShape;
+use bevy_rapier2d::prelude::RigidBodyActivation;
+use bevy_rapier2d::prelude::RigidBodyDamping;
+use bevy_rapier2d::prelude::RigidBodyMassProps;
+use bevy_rapier2d::prelude::RigidBodyPosition;
+use bevy_rapier2d::prelude::RigidBodyVelocity;
+use bevy_rapier2d::rapier::dynamics::BallJoint;
+// use bevy_rapier2d::rapier::geometry::ColliderBuilder;
 use nalgebra::Point2;
 use rand::Rng;
 
 fn main() {
     App::build()
         .init_resource::<Game>()
-        .add_resource(ClearColor(Color::rgb(0.0, 0.0, 0.0)))
-        .add_resource(Msaa::default())
+        .insert_resource(ClearColor(Color::rgb(0.0, 0.0, 0.0)))
+        .insert_resource(Msaa::default())
         .add_plugins(DefaultPlugins)
         .add_startup_system(setup_rapier.system())
         .add_startup_system(setup_game.system())
@@ -26,7 +31,7 @@ fn main() {
         .add_system(block_death_detection.system())
         .add_system(tetromino_sleep_detection.system())
         .add_system(update_health_bar.system())
-        .add_plugin(RapierPhysicsPlugin)
+        .add_plugin(RapierPhysicsPlugin::<NoUserData>::default())
         .run();
 }
 
@@ -111,7 +116,7 @@ fn byte_rgb(r: u8, g: u8, b: u8) -> Color {
 }
 
 fn setup_game(
-    commands: &mut Commands,
+    mut commands: Commands,
     mut game: ResMut<Game>,
     mut materials: ResMut<Assets<ColorMaterial>>,
 ) {
@@ -125,7 +130,12 @@ fn setup_game(
         materials.add(byte_rgb(255, 0, 0).into()),
     ];
 
-    game.camera = commands.spawn(Camera2dBundle::default()).current_entity();
+    game.camera = Some(
+        commands
+            .spawn()
+            .insert_bundle(OrthographicCameraBundle::new_2d())
+            .id(),
+    );
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -198,7 +208,7 @@ struct HealthBar {
 }
 
 fn setup_board(
-    commands: &mut Commands,
+    mut commands: Commands,
     game: Res<Game>,
     mut materials: ResMut<Assets<ColorMaterial>>,
 ) {
@@ -206,7 +216,8 @@ fn setup_board(
 
     // Add floor
     commands
-        .spawn(SpriteBundle {
+        .spawn()
+        .insert_bundle(SpriteBundle {
             material: materials.add(Color::rgb(0.5, 0.5, 0.5).into()),
             sprite: Sprite::new(Vec2::new(
                 game.n_lanes as f32 * BLOCK_PX_SIZE,
@@ -214,15 +225,20 @@ fn setup_board(
             )),
             ..Default::default()
         })
-        .with(RigidBodyBuilder::new_static().translation(0.0, floor_y - (FLOOR_BLOCK_HEIGHT * 0.5)))
-        .with(ColliderBuilder::cuboid(
-            game.n_lanes as f32 * 0.5,
-            FLOOR_BLOCK_HEIGHT * 0.5,
-        ));
+        .insert_bundle(RigidBodyBundle {
+            body_type: bevy_rapier2d::prelude::RigidBodyType::Static,
+            position: [0.0, floor_y - (FLOOR_BLOCK_HEIGHT * 0.5)].into(),
+            ..RigidBodyBundle::default()
+        })
+        .insert_bundle(ColliderBundle {
+            shape: ColliderShape::cuboid(game.n_lanes as f32 * 0.5, FLOOR_BLOCK_HEIGHT * 0.5),
+            ..ColliderBundle::default()
+        });
 
     // Add health bar
     commands
-        .spawn(SpriteBundle {
+        .spawn()
+        .insert_bundle(SpriteBundle {
             material: materials.add(Color::rgb(1.0, 1.0, 1.0).into()),
             sprite: Sprite::new(Vec2::new(
                 (game.n_lanes as f32 - 2.0) * BLOCK_PX_SIZE,
@@ -234,16 +250,16 @@ fn setup_board(
                     (floor_y - (FLOOR_BLOCK_HEIGHT / 2.0)) * BLOCK_PX_SIZE,
                     2.0,
                 ),
-                rotation: Quat::identity(),
+                rotation: Quat::IDENTITY,
                 scale: Vec3::new(0.0, 1.0, 1.0),
             },
             ..Default::default()
         })
-        .with(HealthBar { value: 0.0 });
+        .insert(HealthBar { value: 0.0 });
 }
 
-fn setup_initial_tetromino(commands: &mut Commands, mut game: ResMut<Game>) {
-    spawn_tetromino(commands, &mut game);
+fn setup_initial_tetromino(mut commands: Commands, mut game: ResMut<Game>) {
+    spawn_tetromino(&mut commands, &mut game);
 }
 
 fn spawn_tetromino(commands: &mut Commands, game: &mut Game) {
@@ -269,13 +285,13 @@ fn spawn_tetromino(commands: &mut Commands, game: &mut Game) {
             let anchor_2 = Point2::new(x_dir * -0.5, y_dir * -0.5);
 
             commands
-                .spawn((JointBuilderComponent::new(
+                .spawn()
+                .insert_bundle((JointBuilderComponent::new(
                     BallJoint::new(anchor_1, anchor_2),
                     block_entities[*i],
                     block_entities[*j],
                 ),))
-                .current_entity()
-                .unwrap()
+                .id()
         })
         .collect();
 
@@ -299,73 +315,72 @@ fn spawn_block(
     // Game gets more difficult when this is lower:
     let linear_damping = 3.0;
 
-    let rigid_body = RigidBodyBuilder::new_dynamic()
-        .translation(x, y)
-        .mass(1.0)
-        .linear_damping(linear_damping);
-    let collider = ColliderBuilder::cuboid(0.5, 0.5).density(1.0);
-
     commands
-        .spawn(SpriteBundle {
+        .spawn()
+        .insert_bundle(SpriteBundle {
             material: game.tetromino_colors[kind as usize].clone(),
             sprite: Sprite::new(Vec2::new(BLOCK_PX_SIZE, BLOCK_PX_SIZE)),
             ..Default::default()
         })
-        .with(rigid_body)
-        .with(collider)
-        .with(Block)
-        .current_entity()
-        .unwrap()
+        .insert_bundle(RigidBodyBundle {
+            position: [x, y].into(),
+            damping: RigidBodyDamping {
+                linear_damping,
+                angular_damping: 0.0,
+            },
+            ..RigidBodyBundle::default()
+        })
+        .insert_bundle(ColliderBundle {
+            shape: ColliderShape::cuboid(0.5, 0.5),
+            ..ColliderBundle::default()
+        })
+        .insert(Block)
+        .id()
 }
 
 fn tetromino_movement(
     input: Res<Input<KeyCode>>,
     game: Res<Game>,
-    block_query: Query<&RigidBodyHandleComponent>,
-    mut rigid_bodies: ResMut<RigidBodySet>,
+    mut block_query: Query<&mut RigidBodyVelocity>,
 ) {
     let movement = input.pressed(KeyCode::Right) as i8 - input.pressed(KeyCode::Left) as i8;
     let torque = input.pressed(KeyCode::A) as i8 - input.pressed(KeyCode::D) as i8;
 
     for block_entity in &game.current_tetromino_blocks {
-        if let Ok(rigid_body_component) = block_query.get(*block_entity) {
-            if let Some(rigid_body) = rigid_bodies.get_mut(rigid_body_component.handle()) {
-                if movement != 0 {
-                    rigid_body
-                        .apply_force(Vector2::new(movement as f32 * MOVEMENT_FORCE, 0.0), true);
-                }
-                if torque != 0 {
-                    rigid_body.apply_torque(torque as f32 * TORQUE, true);
-                }
+        if let Ok(mut velocity) = block_query.get_mut(*block_entity) {
+            if movement != 0 {
+                velocity.linvel.y += movement as f32 * MOVEMENT_FORCE;
+            }
+            if torque != 0 {
+                velocity
+                    .apply_torque_impulse(&RigidBodyMassProps::default(), torque as f32 * TORQUE);
             }
         }
     }
 }
 
 fn tetromino_sleep_detection(
-    commands: &mut Commands,
+    mut commands: Commands,
     mut game: ResMut<Game>,
-    block_query: Query<(Entity, &RigidBodyHandleComponent)>,
-    rigid_bodies: ResMut<RigidBodySet>,
+    block_query: Query<(Entity, &RigidBodyActivation, &RigidBodyPosition)>, // rigid_bodies: ResMut<RigidBodySet>,
 ) {
     let all_blocks_sleeping = game.current_tetromino_blocks.iter().all(|block_entity| {
         block_query
             .get(*block_entity)
             .ok()
-            .and_then(|(_, rigid_body_component)| rigid_bodies.get(rigid_body_component.handle()))
-            .map(RigidBody::is_sleeping)
+            .map(|(_, activation, _)| (activation.sleeping))
             .unwrap_or(false)
     });
 
     if all_blocks_sleeping {
         for joint in &game.current_tetromino_joints {
-            commands.despawn(*joint);
+            commands.entity(*joint).despawn();
         }
 
-        clear_filled_rows(commands, &mut game, block_query, &rigid_bodies);
+        clear_filled_rows(&mut commands, &mut game, block_query);
 
         if game.stats.health() > 0.0 {
-            spawn_tetromino(commands, &mut game);
+            spawn_tetromino(&mut commands, &mut game);
         }
     }
 }
@@ -373,29 +388,26 @@ fn tetromino_sleep_detection(
 fn clear_filled_rows(
     commands: &mut Commands,
     game: &mut Game,
-    block_query: Query<(Entity, &RigidBodyHandleComponent)>,
-    rigid_bodies: &RigidBodySet,
+    block_query: Query<(Entity, &RigidBodyActivation, &RigidBodyPosition)>,
 ) {
     let mut blocks_per_row: Vec<Vec<Entity>> = (0..game.n_rows).map(|_| vec![]).collect();
 
     let floor_y = game.floor_y();
 
-    for (block_entity, rigid_body_component) in block_query.iter() {
-        if let Some(rigid_body) = rigid_bodies.get(rigid_body_component.handle()) {
-            // Only sleeping blocks count.. So disregard blocks "falling off"
-            // that are in the row
-            if !rigid_body.is_sleeping() {
-                continue;
-            }
+    for (block_entity, activation, position) in block_query.iter() {
+        // Only sleeping blocks count.. So disregard blocks "falling off"
+        // that are in the row
+        if !activation.sleeping {
+            continue;
+        }
 
-            let floor_distance = rigid_body.position().translation.vector.y - floor_y;
+        let floor_distance = position.position.translation.y - floor_y;
 
-            // The center of a block on the floor is 0.5 above the floor, so .floor() the number ;)
-            let row = floor_distance.floor() as i32;
+        // The center of a block on the floor is 0.5 above the floor, so .floor() the number ;)
+        let row = floor_distance.floor() as i32;
 
-            if row >= 0 && row < game.n_rows as i32 {
-                blocks_per_row[row as usize].push(block_entity);
-            }
+        if row >= 0 && row < game.n_rows as i32 {
+            blocks_per_row[row as usize].push(block_entity);
         }
     }
 
@@ -404,14 +416,14 @@ fn clear_filled_rows(
             game.stats.cleared_blocks += game.n_lanes as i32;
 
             for block_entity in row_blocks {
-                commands.despawn(block_entity);
+                commands.entity(block_entity).despawn_recursive();
             }
         }
     }
 }
 
 fn block_death_detection(
-    commands: &mut Commands,
+    mut commands: Commands,
     mut game: ResMut<Game>,
     projection_query: Query<&OrthographicProjection>,
     block_query: Query<(Entity, &Transform, &Block)>,
@@ -426,7 +438,7 @@ fn block_death_detection(
                 }
 
                 game.stats.lost_blocks += 1;
-                commands.despawn(block_entity);
+                commands.entity(block_entity).despawn_recursive();
             }
         }
     }
