@@ -10,6 +10,7 @@ use bevy_rapier2d::physics::{JointBuilderComponent, RapierConfiguration, RapierP
 use bevy_rapier2d::prelude::ColliderShape;
 use bevy_rapier2d::prelude::RigidBodyActivation;
 use bevy_rapier2d::prelude::RigidBodyDamping;
+use bevy_rapier2d::prelude::RigidBodyForces;
 use bevy_rapier2d::prelude::RigidBodyMassProps;
 use bevy_rapier2d::prelude::RigidBodyPosition;
 use bevy_rapier2d::prelude::RigidBodyVelocity;
@@ -337,19 +338,18 @@ fn spawn_block(
 fn tetromino_movement(
     input: Res<Input<KeyCode>>,
     game: Res<Game>,
-    mut block_query: Query<&mut RigidBodyVelocity>,
+    mut forces_query: Query<&mut RigidBodyForces>,
 ) {
     let movement = input.pressed(KeyCode::Right) as i8 - input.pressed(KeyCode::Left) as i8;
     let torque = input.pressed(KeyCode::A) as i8 - input.pressed(KeyCode::D) as i8;
 
     for block_entity in &game.current_tetromino_blocks {
-        if let Ok(mut velocity) = block_query.get_mut(*block_entity) {
+        if let Ok(mut forces) = forces_query.get_mut(*block_entity) {
             if movement != 0 {
-                velocity.linvel.y += movement as f32 * MOVEMENT_FORCE;
+                forces.force = Vec2::new(movement as f32 * MOVEMENT_FORCE, 0.0).into();
             }
             if torque != 0 {
-                velocity
-                    .apply_torque_impulse(&RigidBodyMassProps::default(), torque as f32 * TORQUE);
+                forces.torque = torque as f32 * TORQUE;
             }
         }
     }
