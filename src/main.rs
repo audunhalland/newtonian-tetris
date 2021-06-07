@@ -1,7 +1,6 @@
 use std::collections::HashSet;
 
 use bevy::prelude::*;
-use bevy::render::camera::OrthographicProjection;
 use bevy::render::pass::ClearColor;
 use bevy_rapier2d::prelude::*;
 use rand::Rng;
@@ -13,10 +12,9 @@ fn main() {
         .insert_resource(Msaa::default())
         .add_plugins(DefaultPlugins)
         .add_startup_system(setup_game.system())
-        .add_system(tetromino_movement.system())
-        .add_system(block_death_detection.system())
+        // .add_system(tetromino_movement.system())
         .add_system(tetromino_sleep_detection.system())
-        .add_system(update_health_bar.system())
+        // .add_system(update_health_bar.system())
         .add_plugin(RapierPhysicsPlugin::<NoUserData>::default())
         .run();
 }
@@ -26,9 +24,6 @@ const BLOCK_PX_SIZE: f32 = 30.0;
 // In terms of block size:
 const FLOOR_BLOCK_HEIGHT: f32 = 2.0;
 const HEALTH_BAR_HEIGHT: f32 = 0.5;
-
-const MOVEMENT_FORCE: f32 = 20.0;
-const TORQUE: f32 = 20.0;
 
 #[derive(Default)]
 struct Stats {
@@ -322,31 +317,12 @@ fn spawn_block(
         .id()
 }
 
-fn tetromino_movement(
-    input: Res<Input<KeyCode>>,
-    game: Res<Game>,
-    mut forces_query: Query<&mut RigidBodyForces>,
-) {
-    let movement = input.pressed(KeyCode::Right) as i8 - input.pressed(KeyCode::Left) as i8;
-    let torque = input.pressed(KeyCode::A) as i8 - input.pressed(KeyCode::D) as i8;
-
-    for block_entity in &game.current_tetromino_blocks {
-        if let Ok(mut forces) = forces_query.get_mut(*block_entity) {
-            if movement != 0 {
-                forces.force = Vec2::new(movement as f32 * MOVEMENT_FORCE, 0.0).into();
-            }
-            if torque != 0 {
-                forces.torque = torque as f32 * TORQUE;
-            }
-        }
-    }
-}
-
 fn tetromino_sleep_detection(
     mut commands: Commands,
     mut game: ResMut<Game>,
     block_query: Query<(Entity, &RigidBodyActivation, &RigidBodyPosition)>,
 ) {
+    /*
     let all_blocks_sleeping = game.current_tetromino_blocks.iter().all(|block_entity| {
         block_query
             .get(*block_entity)
@@ -354,6 +330,8 @@ fn tetromino_sleep_detection(
             .map(|(_, activation, _)| (activation.sleeping))
             .unwrap_or(false)
     });
+    */
+    let all_blocks_sleeping = true;
 
     if all_blocks_sleeping {
         for joint in &game.current_tetromino_joints {
@@ -380,9 +358,11 @@ fn clear_filled_rows(
     for (block_entity, activation, position) in block_query.iter() {
         // Only sleeping blocks count.. So disregard blocks "falling off"
         // that are in the row
+        /*
         if !activation.sleeping {
             continue;
         }
+        */
 
         let floor_distance = position.position.translation.y - floor_y;
 
@@ -402,45 +382,5 @@ fn clear_filled_rows(
                 commands.entity(block_entity).despawn_recursive();
             }
         }
-    }
-}
-
-fn block_death_detection(
-    mut commands: Commands,
-    mut game: ResMut<Game>,
-    projection_query: Query<&OrthographicProjection>,
-    block_query: Query<(Entity, &Transform, &Block)>,
-) {
-    for projection in projection_query.iter() {
-        let outside_limit = projection.bottom - BLOCK_PX_SIZE * 2.0;
-
-        for (block_entity, transform, _) in block_query.iter() {
-            if transform.translation.y < outside_limit {
-                if game.current_tetromino_blocks.contains(&block_entity) {
-                    game.stats.lost_tetromino = true;
-                }
-
-                game.stats.lost_blocks += 1;
-                commands.entity(block_entity).despawn_recursive();
-            }
-        }
-    }
-}
-
-fn update_health_bar(
-    game: Res<Game>,
-    mut health_bar_query: Query<(&mut HealthBar, &mut Transform)>,
-) {
-    let health = game.stats.health();
-
-    let half_width = (game.n_lanes - 2) as f32 * 0.5;
-
-    for (mut healthbar, mut transform) in health_bar_query.iter_mut() {
-        let delta = health - healthbar.value;
-        healthbar.value += delta * 0.1;
-
-        transform.translation.x =
-            ((game.left_wall_x() + 1.0) + half_width * healthbar.value) * BLOCK_PX_SIZE;
-        transform.scale.x = healthbar.value;
     }
 }
