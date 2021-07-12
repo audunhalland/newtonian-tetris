@@ -90,10 +90,6 @@ impl Default for Game {
     }
 }
 
-fn byte_rgb(r: u8, g: u8, b: u8) -> Color {
-    Color::rgb(r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0)
-}
-
 fn setup_game(
     mut commands: Commands,
     mut game: ResMut<Game>,
@@ -106,13 +102,13 @@ fn setup_game(
     rapier_config.scale = BLOCK_PX_SIZE;
 
     game.tetromino_colors = vec![
-        materials.add(byte_rgb(0, 244, 243).into()),
-        materials.add(byte_rgb(238, 243, 0).into()),
-        materials.add(byte_rgb(177, 0, 254).into()),
-        materials.add(byte_rgb(27, 0, 250).into()),
-        materials.add(byte_rgb(252, 157, 0).into()),
-        materials.add(byte_rgb(0, 247, 0).into()),
-        materials.add(byte_rgb(255, 0, 0).into()),
+        materials.add(Color::rgb_u8(0, 244, 243).into()),
+        materials.add(Color::rgb_u8(238, 243, 0).into()),
+        materials.add(Color::rgb_u8(177, 0, 254).into()),
+        materials.add(Color::rgb_u8(27, 0, 250).into()),
+        materials.add(Color::rgb_u8(252, 157, 0).into()),
+        materials.add(Color::rgb_u8(0, 247, 0).into()),
+        materials.add(Color::rgb_u8(255, 0, 0).into()),
     ];
 
     game.camera = Some(
