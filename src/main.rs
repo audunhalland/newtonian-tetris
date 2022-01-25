@@ -2,22 +2,22 @@ use std::collections::HashSet;
 
 use bevy::prelude::*;
 use bevy::render::camera::OrthographicProjection;
-use bevy::render::pass::ClearColor;
 use bevy_rapier2d::prelude::*;
 use rand::Rng;
 
 fn main() {
-    App::build()
+    App::new()
+        .add_plugins(DefaultPlugins)
         .init_resource::<Game>()
         .insert_resource(ClearColor(Color::rgb(0.0, 0.0, 0.0)))
-        .insert_resource(Msaa::default())
-        .add_plugins(DefaultPlugins)
-        .add_startup_system(setup_game.system())
-        .add_system(tetromino_movement.system())
-        .add_system(block_death_detection.system())
-        .add_system(tetromino_sleep_detection.system())
-        .add_system(update_health_bar.system())
+        // .insert_resource(Msaa::default())
+        .add_startup_system(setup_game)
+        .add_system(tetromino_movement)
+        .add_system(block_death_detection)
+        .add_system(tetromino_sleep_detection)
+        .add_system(update_health_bar)
         .add_plugin(RapierPhysicsPlugin::<NoUserData>::default())
+        .add_system(bevy::input::system::exit_on_esc_system)
         .run();
 }
 
@@ -60,7 +60,6 @@ struct Game {
     n_lanes: usize,
     n_rows: usize,
     stats: Stats,
-    tetromino_colors: Vec<Handle<ColorMaterial>>,
     current_tetromino_blocks: HashSet<Entity>,
     current_tetromino_joints: Vec<Entity>,
     camera: Option<Entity>,
@@ -82,7 +81,6 @@ impl Default for Game {
             n_lanes: 10,
             n_rows: 20,
             stats: Stats::default(),
-            tetromino_colors: vec![],
             current_tetromino_blocks: HashSet::new(),
             current_tetromino_joints: vec![],
             camera: None,
@@ -94,22 +92,11 @@ fn setup_game(
     mut commands: Commands,
     mut game: ResMut<Game>,
     mut rapier_config: ResMut<RapierConfiguration>,
-    mut materials: ResMut<Assets<ColorMaterial>>,
 ) {
     // While we want our sprite to look ~40 px square, we want to keep the physics units smaller
     // to prevent float rounding problems. To do this, we set the scale factor in RapierConfiguration
     // and divide our sprite_size by the scale.
     rapier_config.scale = BLOCK_PX_SIZE;
-
-    game.tetromino_colors = vec![
-        materials.add(Color::rgb_u8(0, 244, 243).into()),
-        materials.add(Color::rgb_u8(238, 243, 0).into()),
-        materials.add(Color::rgb_u8(177, 0, 254).into()),
-        materials.add(Color::rgb_u8(27, 0, 250).into()),
-        materials.add(Color::rgb_u8(252, 157, 0).into()),
-        materials.add(Color::rgb_u8(0, 247, 0).into()),
-        materials.add(Color::rgb_u8(255, 0, 0).into()),
-    ];
 
     game.camera = Some(
         commands
@@ -118,7 +105,7 @@ fn setup_game(
             .id(),
     );
 
-    setup_board(&mut commands, &*game, materials);
+    setup_board(&mut commands, &*game);
 
     // initial tetromino
     spawn_tetromino(&mut commands, &mut game);
@@ -180,6 +167,18 @@ impl TetrominoKind {
             },
         }
     }
+
+    fn color(&self) -> Color {
+        match self {
+            Self::I => Color::rgb_u8(0, 244, 243).into(),
+            Self::O => Color::rgb_u8(238, 243, 0).into(),
+            Self::T => Color::rgb_u8(177, 0, 254).into(),
+            Self::J => Color::rgb_u8(27, 0, 250).into(),
+            Self::L => Color::rgb_u8(252, 157, 0).into(),
+            Self::S => Color::rgb_u8(0, 247, 0).into(),
+            Self::Z => Color::rgb_u8(255, 0, 0).into(),
+        }
+    }
 }
 
 struct TetrominoLayout {
@@ -187,33 +186,47 @@ struct TetrominoLayout {
     joints: Vec<(usize, usize)>,
 }
 
+#[derive(Component)]
 struct Block;
 
+#[derive(Component)]
 struct HealthBar {
     value: f32,
 }
 
-fn setup_board(commands: &mut Commands, game: &Game, mut materials: ResMut<Assets<ColorMaterial>>) {
+fn setup_board(commands: &mut Commands, game: &Game) {
     let floor_y = game.floor_y();
 
     // Add floor
     commands
         .spawn()
         .insert_bundle(SpriteBundle {
-            material: materials.add(Color::rgb(0.5, 0.5, 0.5).into()),
-            sprite: Sprite::new(Vec2::new(
-                game.n_lanes as f32 * BLOCK_PX_SIZE,
-                FLOOR_BLOCK_HEIGHT * BLOCK_PX_SIZE,
-            )),
+            sprite: Sprite {
+                color: Color::rgb(0.5, 0.5, 0.5),
+                custom_size: Some(Vec2::new(
+                    game.n_lanes as f32 * BLOCK_PX_SIZE,
+                    FLOOR_BLOCK_HEIGHT * BLOCK_PX_SIZE,
+                )),
+                ..Default::default()
+            },
+            transform: Transform {
+                scale: Vec3::new(
+                    game.n_lanes as f32 * BLOCK_PX_SIZE,
+                    FLOOR_BLOCK_HEIGHT * BLOCK_PX_SIZE,
+                    0.0,
+                ),
+                ..Default::default()
+            },
             ..Default::default()
         })
         .insert_bundle(RigidBodyBundle {
-            body_type: bevy_rapier2d::prelude::RigidBodyType::Static,
+            body_type: RigidBodyType::Static.into(),
             position: [0.0, floor_y - (FLOOR_BLOCK_HEIGHT * 0.5)].into(),
             ..RigidBodyBundle::default()
         })
         .insert_bundle(ColliderBundle {
-            shape: ColliderShape::cuboid(game.n_lanes as f32 * 0.5, FLOOR_BLOCK_HEIGHT * 0.5),
+            shape: ColliderShape::cuboid(game.n_lanes as f32 * 0.5, FLOOR_BLOCK_HEIGHT * 0.5)
+                .into(),
             ..ColliderBundle::default()
         })
         .insert(RigidBodyPositionSync::Discrete);
@@ -222,11 +235,14 @@ fn setup_board(commands: &mut Commands, game: &Game, mut materials: ResMut<Asset
     commands
         .spawn()
         .insert_bundle(SpriteBundle {
-            material: materials.add(Color::rgb(1.0, 1.0, 1.0).into()),
-            sprite: Sprite::new(Vec2::new(
-                (game.n_lanes as f32 - 2.0) * BLOCK_PX_SIZE,
-                BLOCK_PX_SIZE * HEALTH_BAR_HEIGHT,
-            )),
+            sprite: Sprite {
+                color: Color::rgb(1.0, 1.0, 1.0),
+                custom_size: Some(Vec2::new(
+                    (game.n_lanes as f32 - 2.0) * BLOCK_PX_SIZE,
+                    BLOCK_PX_SIZE * HEALTH_BAR_HEIGHT,
+                )),
+                ..Default::default()
+            },
             transform: Transform {
                 translation: Vec3::new(
                     (game.left_wall_x() + 1.0) * BLOCK_PX_SIZE,
@@ -266,7 +282,9 @@ fn spawn_tetromino(commands: &mut Commands, game: &mut Game) {
             commands
                 .spawn()
                 .insert_bundle((JointBuilderComponent::new(
-                    BallJoint::new(anchor_1, anchor_2),
+                    RevoluteJoint::new()
+                        .local_anchor1(anchor_1)
+                        .local_anchor2(anchor_2),
                     block_entities[*i],
                     block_entities[*j],
                 ),))
@@ -297,8 +315,11 @@ fn spawn_block(
     commands
         .spawn()
         .insert_bundle(SpriteBundle {
-            material: game.tetromino_colors[kind as usize].clone(),
-            sprite: Sprite::new(Vec2::new(BLOCK_PX_SIZE, BLOCK_PX_SIZE)),
+            sprite: Sprite {
+                color: kind.color(),
+                custom_size: Some(Vec2::new(BLOCK_PX_SIZE, BLOCK_PX_SIZE)),
+                ..Default::default()
+            },
             ..Default::default()
         })
         .insert_bundle(RigidBodyBundle {
@@ -306,11 +327,12 @@ fn spawn_block(
             damping: RigidBodyDamping {
                 linear_damping,
                 angular_damping: 0.0,
-            },
+            }
+            .into(),
             ..RigidBodyBundle::default()
         })
         .insert_bundle(ColliderBundle {
-            shape: ColliderShape::cuboid(0.5, 0.5),
+            shape: ColliderShape::cuboid(0.5, 0.5).into(),
             ..ColliderBundle::default()
         })
         .insert(RigidBodyPositionSync::Discrete)
@@ -321,7 +343,7 @@ fn spawn_block(
 fn tetromino_movement(
     input: Res<Input<KeyCode>>,
     game: Res<Game>,
-    mut forces_query: Query<&mut RigidBodyForces>,
+    mut forces_query: Query<&mut RigidBodyForcesComponent>,
 ) {
     let movement = input.pressed(KeyCode::Right) as i8 - input.pressed(KeyCode::Left) as i8;
     let torque = input.pressed(KeyCode::A) as i8 - input.pressed(KeyCode::D) as i8;
@@ -341,7 +363,11 @@ fn tetromino_movement(
 fn tetromino_sleep_detection(
     mut commands: Commands,
     mut game: ResMut<Game>,
-    block_query: Query<(Entity, &RigidBodyActivation, &RigidBodyPosition)>,
+    block_query: Query<(
+        Entity,
+        &RigidBodyActivationComponent,
+        &RigidBodyPositionComponent,
+    )>,
 ) {
     let all_blocks_sleeping = game.current_tetromino_blocks.iter().all(|block_entity| {
         block_query
@@ -367,7 +393,11 @@ fn tetromino_sleep_detection(
 fn clear_filled_rows(
     commands: &mut Commands,
     game: &mut Game,
-    block_query: Query<(Entity, &RigidBodyActivation, &RigidBodyPosition)>,
+    block_query: Query<(
+        Entity,
+        &RigidBodyActivationComponent,
+        &RigidBodyPositionComponent,
+    )>,
 ) {
     let mut blocks_per_row: Vec<Vec<Entity>> = (0..game.n_rows).map(|_| vec![]).collect();
 
