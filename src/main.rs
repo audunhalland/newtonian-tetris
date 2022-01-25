@@ -8,16 +8,15 @@ use rand::Rng;
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
-        .init_resource::<Game>()
+        .insert_resource(Game::new())
         .insert_resource(ClearColor(Color::rgb(0.0, 0.0, 0.0)))
-        // .insert_resource(Msaa::default())
+        .insert_resource(Msaa::default())
         .add_startup_system(setup_game)
         .add_system(tetromino_movement)
         .add_system(block_death_detection)
         .add_system(tetromino_sleep_detection)
         .add_system(update_health_bar)
         .add_plugin(RapierPhysicsPlugin::<NoUserData>::default())
-        .add_system(bevy::input::system::exit_on_esc_system)
         .run();
 }
 
@@ -66,17 +65,7 @@ struct Game {
 }
 
 impl Game {
-    fn floor_y(&self) -> f32 {
-        -(self.n_rows as f32) * 0.5
-    }
-
-    fn left_wall_x(&self) -> f32 {
-        -(self.n_lanes as f32) * 0.5
-    }
-}
-
-impl Default for Game {
-    fn default() -> Self {
+    fn new() -> Self {
         Self {
             n_lanes: 10,
             n_rows: 20,
@@ -85,6 +74,14 @@ impl Default for Game {
             current_tetromino_joints: vec![],
             camera: None,
         }
+    }
+
+    fn floor_y(&self) -> f32 {
+        -(self.n_rows as f32) * 0.5
+    }
+
+    fn left_wall_x(&self) -> f32 {
+        -(self.n_lanes as f32) * 0.5
     }
 }
 
@@ -207,14 +204,6 @@ fn setup_board(commands: &mut Commands, game: &Game) {
                     game.n_lanes as f32 * BLOCK_PX_SIZE,
                     FLOOR_BLOCK_HEIGHT * BLOCK_PX_SIZE,
                 )),
-                ..Default::default()
-            },
-            transform: Transform {
-                scale: Vec3::new(
-                    game.n_lanes as f32 * BLOCK_PX_SIZE,
-                    FLOOR_BLOCK_HEIGHT * BLOCK_PX_SIZE,
-                    0.0,
-                ),
                 ..Default::default()
             },
             ..Default::default()
