@@ -7,7 +7,9 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-bevy = "0.6"
-bevy_rapier2d = "0.12"
+bevy = "0.8"
+bevy_rapier2d = "0.17"
 rand = "0.8.0"
-nalgebra = "0.30"
+nalgebra = "0.31"
+# Semver breakage in alsa 0.6.1:
+alsa = "=0.6.0"

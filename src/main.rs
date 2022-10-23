@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use bevy::prelude::*;
-use bevy::render::camera::OrthographicProjection;
+use bevy::render::camera::{OrthographicProjection, ScalingMode};
 use bevy_rapier2d::prelude::*;
 use rand::Rng;
 
@@ -19,8 +19,6 @@ fn main() {
         .add_plugin(RapierPhysicsPlugin::<NoUserData>::default())
         .run();
 }
-
-const BLOCK_PX_SIZE: f32 = 30.0;
 
 // In terms of block size:
 const FLOOR_BLOCK_HEIGHT: f32 = 2.0;
@@ -88,17 +86,22 @@ impl Game {
 fn setup_game(
     mut commands: Commands,
     mut game: ResMut<Game>,
-    mut rapier_config: ResMut<RapierConfiguration>,
 ) {
-    // While we want our sprite to look ~40 px square, we want to keep the physics units smaller
-    // to prevent float rounding problems. To do this, we set the scale factor in RapierConfiguration
-    // and divide our sprite_size by the scale.
-    rapier_config.scale = BLOCK_PX_SIZE;
+    let far = 1000.0;
+
+    let n_rows = game.n_rows as i32;
 
     game.camera = Some(
         commands
             .spawn()
-            .insert_bundle(OrthographicCameraBundle::new_2d())
+            .insert_bundle(Camera2dBundle {
+                projection: OrthographicProjection {
+                    far,
+                    scaling_mode: ScalingMode::FixedVertical((n_rows + 5) as f32),
+                    ..Default::default()
+                },
+                ..Default::default()
+            })
             .id(),
     );
 
@@ -201,24 +204,16 @@ fn setup_board(commands: &mut Commands, game: &Game) {
             sprite: Sprite {
                 color: Color::rgb(0.5, 0.5, 0.5),
                 custom_size: Some(Vec2::new(
-                    game.n_lanes as f32 * BLOCK_PX_SIZE,
-                    FLOOR_BLOCK_HEIGHT * BLOCK_PX_SIZE,
+                    game.n_lanes as f32,
+                    FLOOR_BLOCK_HEIGHT,
                 )),
                 ..Default::default()
             },
             ..Default::default()
         })
-        .insert_bundle(RigidBodyBundle {
-            body_type: RigidBodyType::Static.into(),
-            position: [0.0, floor_y - (FLOOR_BLOCK_HEIGHT * 0.5)].into(),
-            ..RigidBodyBundle::default()
-        })
-        .insert_bundle(ColliderBundle {
-            shape: ColliderShape::cuboid(game.n_lanes as f32 * 0.5, FLOOR_BLOCK_HEIGHT * 0.5)
-                .into(),
-            ..ColliderBundle::default()
-        })
-        .insert(RigidBodyPositionSync::Discrete);
+        .insert(RigidBody::Fixed)
+        .insert_bundle(TransformBundle::from(Transform::from_xyz(0.0, floor_y - (FLOOR_BLOCK_HEIGHT - 0.5), 0.0)))
+        .insert(Collider::cuboid(game.n_lanes as f32 * 0.5, FLOOR_BLOCK_HEIGHT * 0.5));
 
     // Add health bar
     commands
@@ -227,15 +222,15 @@ fn setup_board(commands: &mut Commands, game: &Game) {
             sprite: Sprite {
                 color: Color::rgb(1.0, 1.0, 1.0),
                 custom_size: Some(Vec2::new(
-                    (game.n_lanes as f32 - 2.0) * BLOCK_PX_SIZE,
-                    BLOCK_PX_SIZE * HEALTH_BAR_HEIGHT,
+                    game.n_lanes as f32 - 2.0,
+                    HEALTH_BAR_HEIGHT,
                 )),
                 ..Default::default()
             },
             transform: Transform {
                 translation: Vec3::new(
-                    (game.left_wall_x() + 1.0) * BLOCK_PX_SIZE,
-                    (floor_y - (FLOOR_BLOCK_HEIGHT / 2.0)) * BLOCK_PX_SIZE,
+                    game.left_wall_x() + 1.0,
+                    floor_y - (FLOOR_BLOCK_HEIGHT / 2.0),
                     2.0,
                 ),
                 rotation: Quat::IDENTITY,
@@ -268,16 +263,15 @@ fn spawn_tetromino(commands: &mut Commands, game: &mut Game) {
             let anchor_1 = Vec2::new(x_dir * 0.5, y_dir * 0.5).into();
             let anchor_2 = Vec2::new(x_dir * -0.5, y_dir * -0.5).into();
 
-            commands
-                .spawn()
-                .insert_bundle((JointBuilderComponent::new(
-                    RevoluteJoint::new()
-                        .local_anchor1(anchor_1)
-                        .local_anchor2(anchor_2),
-                    block_entities[*i],
-                    block_entities[*j],
-                ),))
-                .id()
+            let joint = RevoluteJointBuilder::new()
+                .local_anchor1(anchor_1)
+                .local_anchor2(anchor_2);
+
+            commands.entity(block_entities[*j])
+                .with_children(|cmd| {
+                    cmd.spawn()
+                        .insert(ImpulseJoint::new(block_entities[*i], joint));
+                }).id()
         })
         .collect();
 
@@ -304,13 +298,15 @@ fn spawn_block(
     commands
         .spawn()
         .insert_bundle(SpriteBundle {
+            transform: Transform::from_xyz(x, y, 0.0),
             sprite: Sprite {
                 color: kind.color(),
-                custom_size: Some(Vec2::new(BLOCK_PX_SIZE, BLOCK_PX_SIZE)),
+                custom_size: Some(Vec2::new(1.0, 1.0)),
                 ..Default::default()
             },
             ..Default::default()
         })
+        /*
         .insert_bundle(RigidBodyBundle {
             position: [x, y].into(),
             damping: RigidBodyDamping {
@@ -320,11 +316,11 @@ fn spawn_block(
             .into(),
             ..RigidBodyBundle::default()
         })
-        .insert_bundle(ColliderBundle {
-            shape: ColliderShape::cuboid(0.5, 0.5).into(),
-            ..ColliderBundle::default()
-        })
-        .insert(RigidBodyPositionSync::Discrete)
+        */
+        .insert(RigidBody::Dynamic)
+        .insert(Collider::cuboid(0.5, 0.5))
+        .insert(Sleeping::default())
+        .insert(ExternalForce::default())
         .insert(Block)
         .id()
 }
@@ -332,13 +328,13 @@ fn spawn_block(
 fn tetromino_movement(
     input: Res<Input<KeyCode>>,
     game: Res<Game>,
-    mut forces_query: Query<&mut RigidBodyForcesComponent>,
+    mut external_force: Query<&mut ExternalForce>,
 ) {
     let movement = input.pressed(KeyCode::Right) as i8 - input.pressed(KeyCode::Left) as i8;
     let torque = input.pressed(KeyCode::A) as i8 - input.pressed(KeyCode::D) as i8;
 
     for block_entity in &game.current_tetromino_blocks {
-        if let Ok(mut forces) = forces_query.get_mut(*block_entity) {
+        if let Ok(mut forces) = external_force.get_mut(*block_entity) {
             if movement != 0 {
                 forces.force = Vec2::new(movement as f32 * MOVEMENT_FORCE, 0.0).into();
             }
@@ -354,15 +350,15 @@ fn tetromino_sleep_detection(
     mut game: ResMut<Game>,
     block_query: Query<(
         Entity,
-        &RigidBodyActivationComponent,
-        &RigidBodyPositionComponent,
+        &Sleeping,
+        &Transform
     )>,
 ) {
     let all_blocks_sleeping = game.current_tetromino_blocks.iter().all(|block_entity| {
         block_query
             .get(*block_entity)
             .ok()
-            .map(|(_, activation, _)| (activation.sleeping))
+            .map(|(_, sleeping, _)| (sleeping.sleeping))
             .unwrap_or(false)
     });
 
@@ -384,22 +380,22 @@ fn clear_filled_rows(
     game: &mut Game,
     block_query: Query<(
         Entity,
-        &RigidBodyActivationComponent,
-        &RigidBodyPositionComponent,
+        &Sleeping,
+        &Transform
     )>,
 ) {
     let mut blocks_per_row: Vec<Vec<Entity>> = (0..game.n_rows).map(|_| vec![]).collect();
 
     let floor_y = game.floor_y();
 
-    for (block_entity, activation, position) in block_query.iter() {
+    for (block_entity, activation, transform) in block_query.iter() {
         // Only sleeping blocks count.. So disregard blocks "falling off"
         // that are in the row
         if !activation.sleeping {
             continue;
         }
 
-        let floor_distance = position.position.translation.y - floor_y;
+        let floor_distance = transform.translation.y - floor_y;
 
         // The center of a block on the floor is 0.5 above the floor, so .floor() the number ;)
         let row = floor_distance.floor() as i32;
@@ -427,7 +423,7 @@ fn block_death_detection(
     block_query: Query<(Entity, &Transform, &Block)>,
 ) {
     for projection in projection_query.iter() {
-        let outside_limit = projection.bottom - BLOCK_PX_SIZE * 2.0;
+        let outside_limit = projection.bottom - 2.0;
 
         for (block_entity, transform, _) in block_query.iter() {
             if transform.translation.y < outside_limit {
@@ -455,7 +451,7 @@ fn update_health_bar(
         healthbar.value += delta * 0.1;
 
         transform.translation.x =
-            ((game.left_wall_x() + 1.0) + half_width * healthbar.value) * BLOCK_PX_SIZE;
+            (game.left_wall_x() + 1.0) + half_width * healthbar.value;
         transform.scale.x = healthbar.value;
     }
 }
