@@ -24,20 +24,20 @@ fn main() {
 const FLOOR_BLOCK_HEIGHT: f32 = 2.0;
 const HEALTH_BAR_HEIGHT: f32 = 0.5;
 
-const MOVEMENT_FORCE: f32 = 20.0;
-const TORQUE: f32 = 20.0;
+const MOVEMENT_FORCE: f32 = 80.0;
+const TORQUE: f32 = 110.0;
 
 #[derive(Default)]
 struct Stats {
     generated_blocks: i32,
     cleared_blocks: i32,
     lost_blocks: i32,
-    lost_tetromino: bool,
+    game_over_duration: Option<f32>,
 }
 
 impl Stats {
     fn health(&self) -> f32 {
-        if self.lost_tetromino {
+        if self.game_over_duration.is_some() {
             0.0
         } else if self.cleared_blocks == 0 {
             if self.lost_blocks > 0 {
@@ -83,10 +83,7 @@ impl Game {
     }
 }
 
-fn setup_game(
-    mut commands: Commands,
-    mut game: ResMut<Game>,
-) {
+fn setup_game(mut commands: Commands, mut game: ResMut<Game>) {
     let far = 1000.0;
 
     let n_rows = game.n_rows as i32;
@@ -97,7 +94,7 @@ fn setup_game(
             .insert_bundle(Camera2dBundle {
                 projection: OrthographicProjection {
                     far,
-                    scaling_mode: ScalingMode::FixedVertical((n_rows + 5) as f32),
+                    scaling_mode: ScalingMode::FixedVertical((n_rows + 7) as f32),
                     ..Default::default()
                 },
                 ..Default::default()
@@ -190,6 +187,17 @@ struct TetrominoLayout {
 struct Block;
 
 #[derive(Component)]
+struct CustomSleep {
+    duration: f32,
+}
+
+impl CustomSleep {
+    fn is_sleeping(&self) -> bool {
+        self.duration > 2.0
+    }
+}
+
+#[derive(Component)]
 struct HealthBar {
     value: f32,
 }
@@ -201,19 +209,19 @@ fn setup_board(commands: &mut Commands, game: &Game) {
     commands
         .spawn()
         .insert_bundle(SpriteBundle {
+            transform: Transform::from_xyz(0.0, floor_y - (FLOOR_BLOCK_HEIGHT - 0.5), 0.0),
             sprite: Sprite {
                 color: Color::rgb(0.5, 0.5, 0.5),
-                custom_size: Some(Vec2::new(
-                    game.n_lanes as f32,
-                    FLOOR_BLOCK_HEIGHT,
-                )),
+                custom_size: Some(Vec2::new(game.n_lanes as f32, FLOOR_BLOCK_HEIGHT)),
                 ..Default::default()
             },
             ..Default::default()
         })
         .insert(RigidBody::Fixed)
-        .insert_bundle(TransformBundle::from(Transform::from_xyz(0.0, floor_y - (FLOOR_BLOCK_HEIGHT - 0.5), 0.0)))
-        .insert(Collider::cuboid(game.n_lanes as f32 * 0.5, FLOOR_BLOCK_HEIGHT * 0.5));
+        .insert(Collider::cuboid(
+            game.n_lanes as f32 * 0.5,
+            FLOOR_BLOCK_HEIGHT * 0.5,
+        ));
 
     // Add health bar
     commands
@@ -221,10 +229,7 @@ fn setup_board(commands: &mut Commands, game: &Game) {
         .insert_bundle(SpriteBundle {
             sprite: Sprite {
                 color: Color::rgb(1.0, 1.0, 1.0),
-                custom_size: Some(Vec2::new(
-                    game.n_lanes as f32 - 2.0,
-                    HEALTH_BAR_HEIGHT,
-                )),
+                custom_size: Some(Vec2::new(game.n_lanes as f32 - 2.0, HEALTH_BAR_HEIGHT)),
                 ..Default::default()
             },
             transform: Transform {
@@ -254,26 +259,28 @@ fn spawn_tetromino(commands: &mut Commands, game: &mut Game) {
         })
         .collect();
 
-    let joint_entities: Vec<Entity> = joints
-        .iter()
-        .map(|(i, j)| {
-            let x_dir = coords[*j].0 as f32 - coords[*i].0 as f32;
-            let y_dir = coords[*j].1 as f32 - coords[*i].1 as f32;
+    let mut joint_entities: Vec<Entity> = vec![];
 
-            let anchor_1 = Vec2::new(x_dir * 0.5, y_dir * 0.5).into();
-            let anchor_2 = Vec2::new(x_dir * -0.5, y_dir * -0.5).into();
+    joints.iter().for_each(|(i, j)| {
+        let x_dir = coords[*j].0 as f32 - coords[*i].0 as f32;
+        let y_dir = coords[*j].1 as f32 - coords[*i].1 as f32;
 
-            let joint = RevoluteJointBuilder::new()
-                .local_anchor1(anchor_1)
-                .local_anchor2(anchor_2);
+        let anchor_1 = Vec2::new(x_dir * 0.5, y_dir * 0.5).into();
+        let anchor_2 = Vec2::new(x_dir * -0.5, y_dir * -0.5).into();
 
-            commands.entity(block_entities[*j])
-                .with_children(|cmd| {
-                    cmd.spawn()
-                        .insert(ImpulseJoint::new(block_entities[*i], joint));
-                }).id()
-        })
-        .collect();
+        let j2 = FixedJointBuilder::new()
+            .local_anchor1(anchor_1)
+            .local_anchor2(anchor_2);
+
+        commands.entity(block_entities[*j]).with_children(|cmd| {
+            let joint_id = cmd
+                .spawn()
+                .insert(ImpulseJoint::new(block_entities[*i], j2))
+                .id();
+
+            joint_entities.push(joint_id);
+        });
+    });
 
     game.stats.generated_blocks += block_entities.len() as i32;
 
@@ -293,7 +300,7 @@ fn spawn_block(
     let y = game.floor_y() + row as f32 + 0.5;
 
     // Game gets more difficult when this is lower:
-    let linear_damping = 3.0;
+    let linear_damping = 10.0;
 
     commands
         .spawn()
@@ -301,25 +308,28 @@ fn spawn_block(
             transform: Transform::from_xyz(x, y, 0.0),
             sprite: Sprite {
                 color: kind.color(),
-                custom_size: Some(Vec2::new(1.0, 1.0)),
+                // custom_size: Some(Vec2::new(1.0, 1.0)),
                 ..Default::default()
             },
             ..Default::default()
         })
+        .insert(RigidBody::Dynamic)
+        //.insert(AdditionalMassProperties::Mass(0.2))
+        .insert(Damping {
+            linear_damping,
+            angular_damping: 0.0,
+        })
+        .insert(Collider::cuboid(0.5, 0.5))
         /*
-        .insert_bundle(RigidBodyBundle {
-            position: [x, y].into(),
-            damping: RigidBodyDamping {
-                linear_damping,
-                angular_damping: 0.0,
-            }
-            .into(),
-            ..RigidBodyBundle::default()
+        .insert(Sleeping {
+            //linear_threshold: 1000000.0,
+            //angular_threshold: 1000000.0,
+            sleeping: false,
+            ..Default::default()
         })
         */
-        .insert(RigidBody::Dynamic)
-        .insert(Collider::cuboid(0.5, 0.5))
-        .insert(Sleeping::default())
+        // BUG: Rapier does not go to sleep
+        .insert(CustomSleep { duration: 0.0 })
         .insert(ExternalForce::default())
         .insert(Block)
         .id()
@@ -335,12 +345,8 @@ fn tetromino_movement(
 
     for block_entity in &game.current_tetromino_blocks {
         if let Ok(mut forces) = external_force.get_mut(*block_entity) {
-            if movement != 0 {
-                forces.force = Vec2::new(movement as f32 * MOVEMENT_FORCE, 0.0).into();
-            }
-            if torque != 0 {
-                forces.torque = torque as f32 * TORQUE;
-            }
+            forces.force = Vec2::new(movement as f32 * MOVEMENT_FORCE, 0.0).into();
+            forces.torque = torque as f32 * TORQUE;
         }
     }
 }
@@ -348,17 +354,28 @@ fn tetromino_movement(
 fn tetromino_sleep_detection(
     mut commands: Commands,
     mut game: ResMut<Game>,
-    block_query: Query<(
-        Entity,
-        &Sleeping,
-        &Transform
-    )>,
+    mut block_query: Query<(Entity, &Transform, &mut CustomSleep, &RapierRigidBodyHandle)>,
+    context: ResMut<RapierContext>,
+    time: Res<Time>,
 ) {
+    for (_, _, mut sleep, handle) in block_query.iter_mut() {
+        if let Some(body) = context.as_ref().bodies.get(handle.0) {
+            let sq_linvel = body.linvel().norm_squared();
+            let sq_angvel = body.angvel() * body.angvel();
+
+            if sq_linvel < 0.4 && sq_angvel < 0.5 {
+                sleep.duration += time.as_ref().delta_seconds();
+            } else {
+                sleep.duration = 0.0;
+            }
+        }
+    }
+
     let all_blocks_sleeping = game.current_tetromino_blocks.iter().all(|block_entity| {
         block_query
             .get(*block_entity)
             .ok()
-            .map(|(_, sleeping, _)| (sleeping.sleeping))
+            .map(|(_, _, sleep, _)| (sleep.is_sleeping()))
             .unwrap_or(false)
     });
 
@@ -378,24 +395,20 @@ fn tetromino_sleep_detection(
 fn clear_filled_rows(
     commands: &mut Commands,
     game: &mut Game,
-    block_query: Query<(
-        Entity,
-        &Sleeping,
-        &Transform
-    )>,
+    block_query: Query<(Entity, &Transform, &mut CustomSleep, &RapierRigidBodyHandle)>,
 ) {
     let mut blocks_per_row: Vec<Vec<Entity>> = (0..game.n_rows).map(|_| vec![]).collect();
 
     let floor_y = game.floor_y();
 
-    for (block_entity, activation, transform) in block_query.iter() {
+    for (block_entity, transform, sleep, _) in block_query.iter() {
         // Only sleeping blocks count.. So disregard blocks "falling off"
         // that are in the row
-        if !activation.sleeping {
+        if !sleep.is_sleeping() {
             continue;
         }
 
-        let floor_distance = transform.translation.y - floor_y;
+        let floor_distance = transform.translation.y + 0.5 - floor_y;
 
         // The center of a block on the floor is 0.5 above the floor, so .floor() the number ;)
         let row = floor_distance.floor() as i32;
@@ -421,6 +434,7 @@ fn block_death_detection(
     mut game: ResMut<Game>,
     projection_query: Query<&OrthographicProjection>,
     block_query: Query<(Entity, &Transform, &Block)>,
+    time: Res<Time>,
 ) {
     for projection in projection_query.iter() {
         let outside_limit = projection.bottom - 2.0;
@@ -428,12 +442,32 @@ fn block_death_detection(
         for (block_entity, transform, _) in block_query.iter() {
             if transform.translation.y < outside_limit {
                 if game.current_tetromino_blocks.contains(&block_entity) {
-                    game.stats.lost_tetromino = true;
+                    if game.stats.game_over_duration.is_none() {
+                        game.stats.game_over_duration = Some(0.0);
+                    }
                 }
 
                 game.stats.lost_blocks += 1;
                 commands.entity(block_entity).despawn_recursive();
             }
+        }
+    }
+
+    if let Some(game_over_duration) = game.stats.game_over_duration.as_mut() {
+        *game_over_duration += time.delta_seconds();
+
+        // Auto-start new game
+        match game.stats.game_over_duration {
+            Some(duration) if duration > 3.0 => {
+                for (entity, _, _) in block_query.iter() {
+                    commands.entity(entity).despawn_recursive();
+                }
+
+                game.stats = Default::default();
+
+                spawn_tetromino(&mut commands, &mut game);
+            }
+            _ => {}
         }
     }
 }
@@ -450,8 +484,7 @@ fn update_health_bar(
         let delta = health - healthbar.value;
         healthbar.value += delta * 0.1;
 
-        transform.translation.x =
-            (game.left_wall_x() + 1.0) + half_width * healthbar.value;
+        transform.translation.x = (game.left_wall_x() + 1.0) + half_width * healthbar.value;
         transform.scale.x = healthbar.value;
     }
 }
