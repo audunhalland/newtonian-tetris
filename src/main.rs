@@ -53,6 +53,7 @@ impl Stats {
     }
 }
 
+#[derive(Resource)]
 struct Game {
     n_lanes: usize,
     n_rows: usize,
@@ -90,8 +91,7 @@ fn setup_game(mut commands: Commands, mut game: ResMut<Game>) {
 
     game.camera = Some(
         commands
-            .spawn()
-            .insert_bundle(Camera2dBundle {
+            .spawn(Camera2dBundle {
                 projection: OrthographicProjection {
                     far,
                     scaling_mode: ScalingMode::FixedVertical((n_rows + 7) as f32),
@@ -187,17 +187,6 @@ struct TetrominoLayout {
 struct Block;
 
 #[derive(Component)]
-struct CustomSleep {
-    duration: f32,
-}
-
-impl CustomSleep {
-    fn is_sleeping(&self) -> bool {
-        self.duration > 2.0
-    }
-}
-
-#[derive(Component)]
 struct HealthBar {
     value: f32,
 }
@@ -207,8 +196,7 @@ fn setup_board(commands: &mut Commands, game: &Game) {
 
     // Add floor
     commands
-        .spawn()
-        .insert_bundle(SpriteBundle {
+        .spawn(SpriteBundle {
             transform: Transform::from_xyz(0.0, floor_y - (FLOOR_BLOCK_HEIGHT - 0.5), 0.0),
             sprite: Sprite {
                 color: Color::rgb(0.5, 0.5, 0.5),
@@ -225,8 +213,7 @@ fn setup_board(commands: &mut Commands, game: &Game) {
 
     // Add health bar
     commands
-        .spawn()
-        .insert_bundle(SpriteBundle {
+        .spawn(SpriteBundle {
             sprite: Sprite {
                 color: Color::rgb(1.0, 1.0, 1.0),
                 custom_size: Some(Vec2::new(game.n_lanes as f32 - 2.0, HEALTH_BAR_HEIGHT)),
@@ -273,10 +260,7 @@ fn spawn_tetromino(commands: &mut Commands, game: &mut Game) {
             .local_anchor2(anchor_2);
 
         commands.entity(block_entities[*j]).with_children(|cmd| {
-            let joint_id = cmd
-                .spawn()
-                .insert(ImpulseJoint::new(block_entities[*i], j2))
-                .id();
+            let joint_id = cmd.spawn(ImpulseJoint::new(block_entities[*i], j2)).id();
 
             joint_entities.push(joint_id);
         });
@@ -303,8 +287,7 @@ fn spawn_block(
     let linear_damping = 10.0;
 
     commands
-        .spawn()
-        .insert_bundle(SpriteBundle {
+        .spawn(SpriteBundle {
             transform: Transform::from_xyz(x, y, 0.0),
             sprite: Sprite {
                 color: kind.color(),
@@ -314,22 +297,20 @@ fn spawn_block(
             ..Default::default()
         })
         .insert(RigidBody::Dynamic)
-        //.insert(AdditionalMassProperties::Mass(0.2))
+        .insert(AdditionalMassProperties::Mass(0.2))
         .insert(Damping {
             linear_damping,
             angular_damping: 0.0,
         })
         .insert(Collider::cuboid(0.5, 0.5))
-        /*
         .insert(Sleeping {
-            //linear_threshold: 1000000.0,
-            //angular_threshold: 1000000.0,
+            linear_threshold: 1.0,
+            angular_threshold: 1.0,
             sleeping: false,
             ..Default::default()
         })
-        */
         // BUG: Rapier does not go to sleep
-        .insert(CustomSleep { duration: 0.0 })
+        // .insert(CustomSleep { duration: 0.0 })
         .insert(ExternalForce::default())
         .insert(Block)
         .id()
@@ -354,28 +335,13 @@ fn tetromino_movement(
 fn tetromino_sleep_detection(
     mut commands: Commands,
     mut game: ResMut<Game>,
-    mut block_query: Query<(Entity, &Transform, &mut CustomSleep, &RapierRigidBodyHandle)>,
-    context: ResMut<RapierContext>,
-    time: Res<Time>,
+    mut block_query: Query<(Entity, &Transform, &mut Sleeping, &RapierRigidBodyHandle)>,
 ) {
-    for (_, _, mut sleep, handle) in block_query.iter_mut() {
-        if let Some(body) = context.as_ref().bodies.get(handle.0) {
-            let sq_linvel = body.linvel().norm_squared();
-            let sq_angvel = body.angvel() * body.angvel();
-
-            if sq_linvel < 0.4 && sq_angvel < 0.5 {
-                sleep.duration += time.as_ref().delta_seconds();
-            } else {
-                sleep.duration = 0.0;
-            }
-        }
-    }
-
     let all_blocks_sleeping = game.current_tetromino_blocks.iter().all(|block_entity| {
         block_query
             .get(*block_entity)
             .ok()
-            .map(|(_, _, sleep, _)| (sleep.is_sleeping()))
+            .map(|(_, _, sleep, _)| (sleep.sleeping))
             .unwrap_or(false)
     });
 
@@ -384,7 +350,11 @@ fn tetromino_sleep_detection(
             commands.entity(*joint).despawn();
         }
 
-        clear_filled_rows(&mut commands, &mut game, block_query);
+        clear_filled_rows(&mut commands, &mut game, &block_query);
+
+        for (_, _, mut sleeping, _) in &mut block_query {
+            sleeping.sleeping = false;
+        }
 
         if game.stats.health() > 0.0 {
             spawn_tetromino(&mut commands, &mut game);
@@ -395,7 +365,7 @@ fn tetromino_sleep_detection(
 fn clear_filled_rows(
     commands: &mut Commands,
     game: &mut Game,
-    block_query: Query<(Entity, &Transform, &mut CustomSleep, &RapierRigidBodyHandle)>,
+    block_query: &Query<(Entity, &Transform, &mut Sleeping, &RapierRigidBodyHandle)>,
 ) {
     let mut blocks_per_row: Vec<Vec<Entity>> = (0..game.n_rows).map(|_| vec![]).collect();
 
@@ -404,7 +374,7 @@ fn clear_filled_rows(
     for (block_entity, transform, sleep, _) in block_query.iter() {
         // Only sleeping blocks count.. So disregard blocks "falling off"
         // that are in the row
-        if !sleep.is_sleeping() {
+        if !sleep.sleeping {
             continue;
         }
 
@@ -437,7 +407,7 @@ fn block_death_detection(
     time: Res<Time>,
 ) {
     for projection in projection_query.iter() {
-        let outside_limit = projection.bottom - 2.0;
+        let outside_limit = projection.area.min.y - 2.0;
 
         for (block_entity, transform, _) in block_query.iter() {
             if transform.translation.y < outside_limit {
