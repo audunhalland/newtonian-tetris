@@ -284,7 +284,7 @@ fn spawn_block(
     let y = game.floor_y() + row as f32 + 0.5;
 
     // Game gets more difficult when this is lower:
-    let linear_damping = 10.0;
+    let linear_damping = 8.5;
 
     commands
         .spawn(SpriteBundle {
@@ -297,15 +297,15 @@ fn spawn_block(
             ..Default::default()
         })
         .insert(RigidBody::Dynamic)
-        .insert(AdditionalMassProperties::Mass(0.2))
+        .insert(AdditionalMassProperties::Mass(0.01))
         .insert(Damping {
             linear_damping,
             angular_damping: 0.0,
         })
         .insert(Collider::cuboid(0.5, 0.5))
         .insert(Sleeping {
-            linear_threshold: 1.0,
-            angular_threshold: 1.0,
+            linear_threshold: 10.0,
+            angular_threshold: 10.0,
             sleeping: false,
             ..Default::default()
         })
